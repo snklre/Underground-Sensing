@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Undersensed — live view</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12151A;
+    --panel: #1B2028;
+    --panel-raised: #232A34;
+    --line: #2A303A;
+    --text: #E8E6DE;
+    --text-dim: #8A8F98;
+    --self: #4FD1A5;
+    --peer: #E8B04B;
+    --error: #E2574C;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    padding: 24px;
+  }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 16px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 0;
+  }
+  h1 span { color: var(--text-dim); font-weight: 400; }
+  #connectBtn {
+    background: var(--self);
+    color: #0A1410;
+    border: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: 12px;
+    padding: 10px 16px;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+  }
+  #connectBtn:hover { opacity: 0.85; }
+  #btStatus {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+  .dot.self { background: var(--self); }
+  .dot.peer { background: var(--peer); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 0 0 12px 0;
+    font-weight: 500;
+  }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--panel-raised);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .tab.active { color: var(--bg); background: var(--self); border-color: var(--self); }
+
+  .legend { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); margin-bottom: 8px; display: flex; gap: 16px; }
+  .legend .swatch { display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; }
+
+  canvas { width: 100%; display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
+  td.self { color: var(--self); }
+  td.peer { color: var(--peer); }
+  .table-scroll { max-height: 300px; overflow-y: auto; }
+
+  #archiveToggle {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: none;
+    border: 1px dashed var(--line);
+    border-radius: 3px;
+    padding: 8px;
+    width: 100%;
+    text-align: center;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  #archiveToggle:hover { color: var(--text); border-color: var(--text-dim); }
+  #archivePane { display: none; margin-top: 10px; }
+
+  .note {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Undersensed <span>· live view</span></h1>
+    <div id="btStatus"><span class="dot" style="background:var(--text-dim)"></span>Not connected — running on simulated data</div>
+  </div>
+  <button id="connectBtn">Connect via Bluetooth</button>
+</header>
+
+<div class="layout">
+  <div class="col-main">
+    <div class="panel">
+      <h2>Trends &amp; spikes — by line, station to station</h2>
+      <div class="tabs" id="metricTabs"></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--self)"></span>live</span>
+        <span><span class="swatch" style="background:var(--text-dim); opacity:0.7"></span>averages</span>
+        <span><span class="swatch" style="background:var(--peer); opacity:0.35"></span>cumulative / bigger averages</span>
+      </div>
+      <canvas id="mainChart" width="900" height="320"></canvas>
+      <div class="note">Station markers are illustrative until real dwell-detection events feed this chart — see the firmware state machine work.</div>
+    </div>
+
+    <div class="panel" style="margin-top:20px;">
+      <h2>Network mesh</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Event</th><th>Time</th><th>Source</th><th>Location note</th></tr></thead>
+          <tbody id="meshBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-side">
+    <div class="panel">
+      <h2>Datalog</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Time</th><th>Sensor</th><th>PM2.5</th><th>PM10</th><th>dB</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+      <button id="archiveToggle">Show archive (older entries)</button>
+      <div id="archivePane">
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Time</th><th>Sensor</th><th>PM2.5</th><th>PM10</th><th>dB</th></tr></thead>
+            <tbody id="archiveBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   BLE data contract — placeholder UUIDs defining the future GATT
+   layout. The firmware doesn't implement this yet; connecting will
+   simply fail gracefully until it does. Random-ish v4 UUIDs, fixed
+   here so firmware and website agree once BLE lands.
+   ================================================================ */
+const UNDERSENSED_SERVICE_UUID   = 'b3c9a000-1d2e-4f3a-8b6c-9e0f1a2b3c4d';
+const SENSOR_DATA_CHAR_UUID      = 'b3c9a001-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // notify: latest reading
+const MESH_EVENT_CHAR_UUID       = 'b3c9a002-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // notify: latest mesh event
+const TIME_SYNC_CHAR_UUID        = 'b3c9a003-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // write: laptop/phone epoch time
+
+const btStatus = document.getElementById('btStatus');
+
+document.getElementById('connectBtn').addEventListener('click', connectBluetooth);
+
+async function connectBluetooth() {
+  if (!navigator.bluetooth) {
+    btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>' +
+      'Web Bluetooth not available in this browser — use Bluefy on iOS, or Chrome on Android/desktop.';
+    return;
+  }
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [UNDERSENSED_SERVICE_UUID] }]
+    });
+    btStatus.innerHTML = '<span class="dot" style="background:var(--self)"></span>Connecting to ' + device.name + '...';
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(UNDERSENSED_SERVICE_UUID);
+
+    // Sensor readings — 66-byte binary packet, see firmware header comment for the exact layout.
+    const sensorChar = await service.getCharacteristic(SENSOR_DATA_CHAR_UUID);
+    await sensorChar.startNotifications();
+    sensorChar.addEventListener('characteristicvaluechanged', handleSensorNotification);
+
+    // Mesh send/receive events — plain text, e.g. "Sent,status:ok" or "Received,device:2"
+    const meshChar = await service.getCharacteristic(MESH_EVENT_CHAR_UUID);
+    await meshChar.startNotifications();
+    meshChar.addEventListener('characteristicvaluechanged', handleMeshNotification);
+
+    // Time sync — write this browser's current time once, so the device's log
+    // timestamps reflect real wall-clock time instead of "unsynced".
+    const timeSyncChar = await service.getCharacteristic(TIME_SYNC_CHAR_UUID);
+    const epochBuf = new ArrayBuffer(4);
+    new DataView(epochBuf).setUint32(0, Math.floor(Date.now() / 1000), true);
+    await timeSyncChar.writeValue(epochBuf);
+
+    btStatus.innerHTML = '<span class="dot" style="background:var(--self)"></span>Connected — ' + device.name + ' (time synced)';
+    simulating = false;
+
+    device.addEventListener('gattserverdisconnected', () => {
+      btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Disconnected';
+      simulating = true;
+    });
+  } catch (err) {
+    btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Connection failed: ' + err.message;
+  }
+}
+
+// Parses the 66-byte sensor packet — offsets must match the firmware's
+// notifySensorData() exactly (see the header comment in the .ino file).
+function handleSensorNotification(event) {
+  const v = event.target.value; // DataView
+  const ERROR_VALUE = -9999;
+  const readOrNull = (offset) => {
+    const val = v.getFloat32(offset, true);
+    return val === ERROR_VALUE ? null : val;
+  };
+
+  const deviceId = v.getUint32(0, true);
+  const accelX = readOrNull(8), accelY = readOrNull(12), accelZ = readOrNull(16);
+  const pressure = readOrNull(32);
+  const co2 = readOrNull(36);
+  const soundDb = readOrNull(40);
+  const pm25 = readOrNull(48);
+  const pm10 = readOrNull(52);
+  const humidity = readOrNull(56);
+  const gasResistance = readOrNull(60);
+  const sourceFlag = v.getUint8(65);
+  const source = sourceFlag === 0 ? 'self' : 'peer';
+
+  tick++;
+  if (soundDb !== null) pushMetricSample('sound', { t: tick, value: soundDb, source });
+  if (pm25 !== null) pushMetricSample('pm', { t: tick, value: pm25, source });
+  if (gasResistance !== null) pushMetricSample('voc', { t: tick, value: gasResistance, source });
+  if (co2 !== null) pushMetricSample('co2', { t: tick, value: co2, source });
+  if (humidity !== null) pushMetricSample('humidity', { t: tick, value: humidity, source });
+  drawChart();
+
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  addLogRow({
+    time: timeStr,
+    source: source,
+    pm25: pm25 !== null ? pm25.toFixed(1) : 'error',
+    pm10: pm10 !== null ? pm10.toFixed(1) : 'error',
+    db: soundDb !== null ? soundDb.toFixed(1) : 'error'
+  });
+}
+
+// Parses mesh event text, e.g. "Sent,status:ok" or "Received,device:2"
+function handleMeshNotification(event) {
+  const text = new TextDecoder().decode(event.target.value);
+  const [eventType, detail] = text.split(',');
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const source = eventType === 'Sent' ? 'self' : 'peer';
+  // Location note requires the dwell-detection state machine, not built yet —
+  // shown as a placeholder until that firmware work lands.
+  addMeshRow(eventType, timeStr, source, detail || '—');
+}
+
+/* ================================================================
+   Metrics, tabs, and simulated data
+   ================================================================ */
+const METRICS = [
+  { id: 'sound', label: 'Sound', unit: 'dB' },
+  { id: 'pm', label: 'Air particulate', unit: 'µg/m³' },
+  { id: 'voc', label: 'VOC', unit: 'ppb' },
+  { id: 'co2', label: 'CO2', unit: 'ppm' },
+  { id: 'humidity', label: 'Humidity', unit: '%' },
+];
+let activeMetric = METRICS[0].id;
+const seriesData = {}; // metricId -> array of {t, value, source}
+METRICS.forEach(m => seriesData[m.id] = []);
+
+const STATIONS = ['Hampstead', 'Golders Green', 'Brent Cross', 'Colindale', 'Burnt Oak'];
+
+const tabsEl = document.getElementById('metricTabs');
+METRICS.forEach(m => {
+  const btn = document.createElement('div');
+  btn.className = 'tab' + (m.id === activeMetric ? ' active' : '');
+  btn.textContent = m.label;
+  btn.dataset.metric = m.id;
+  btn.addEventListener('click', () => {
+    activeMetric = m.id;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    drawChart();
+  });
+  tabsEl.appendChild(btn);
+});
+
+function baselineFor(metricId) {
+  return { sound: 55, pm: 12, voc: 80, co2: 550, humidity: 60 }[metricId];
+}
+function spikeChanceFor(metricId) {
+  return { sound: 0.12, pm: 0.08, voc: 0.05, co2: 0.06, humidity: 0.03 }[metricId];
+}
+
+let tick = 0;
+function generateSample(metricId, source) {
+  const base = baselineFor(metricId);
+  const noise = (Math.random() - 0.5) * base * 0.15;
+  const spike = Math.random() < spikeChanceFor(metricId) ? base * (0.6 + Math.random() * 0.9) : 0;
+  return { t: tick, value: Math.max(0, base + noise + spike), source };
+}
+
+function pushMetricSample(metricId, sample) {
+  const arr = seriesData[metricId];
+  arr.push(sample);
+  if (arr.length > 200) arr.shift();
+}
+
+/* ================================================================
+   Datalog table + archive
+   ================================================================ */
+const logBody = document.getElementById('logBody');
+const archiveBody = document.getElementById('archiveBody');
+const MAX_LIVE_ROWS = 12;
+let liveRows = [];
+
+function addLogRow(row) {
+  liveRows.unshift(row);
+  if (liveRows.length > MAX_LIVE_ROWS) {
+    const overflow = liveRows.pop();
+    const tr = document.createElement('tr');
+    tr.innerHTML = rowHTML(overflow);
+    archiveBody.prepend(tr);
+  }
+  renderLog();
+}
+function rowHTML(row) {
+  return `<td>${row.time}</td><td class="${row.source}">${row.source}</td>` +
+         `<td>${row.pm25}</td><td>${row.pm10}</td><td>${row.db}</td>`;
+}
+function renderLog() {
+  logBody.innerHTML = liveRows.map(r => `<tr>${rowHTML(r)}</tr>`).join('');
+}
+
+document.getElementById('archiveToggle').addEventListener('click', function() {
+  const pane = document.getElementById('archivePane');
+  const showing = pane.style.display === 'block';
+  pane.style.display = showing ? 'none' : 'block';
+  this.textContent = showing ? 'Show archive (older entries)' : 'Hide archive';
+});
+
+/* ================================================================
+   Network mesh table
+   ================================================================ */
+const meshBody = document.getElementById('meshBody');
+function addMeshRow(event, time, source, note) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${event}</td><td>${time}</td><td class="${source === 'self' ? 'self' : 'peer'}">${source}</td><td>${note}</td>`;
+  meshBody.prepend(tr);
+  while (meshBody.children.length > 10) meshBody.removeChild(meshBody.lastChild);
+}
+
+/* ================================================================
+   Chart — hand-drawn canvas, no external library
+   ================================================================ */
+const canvas = document.getElementById('mainChart');
+const ctx = canvas.getContext('2d');
+
+function rollingAvg(arr, window) {
+  return arr.map((_, i) => {
+    const start = Math.max(0, i - window + 1);
+    const slice = arr.slice(start, i + 1);
+    return slice.reduce((s, p) => s + p.value, 0) / slice.length;
+  });
+}
+
+function drawChart() {
+  const data = seriesData[activeMetric];
+  const w = canvas.width, h = canvas.height, padL = 40, padR = 20, padT = 20, padB = 40;
+  ctx.clearRect(0, 0, w, h);
+  if (data.length < 2) return;
+
+  const values = data.map(p => p.value);
+  const shortAvg = rollingAvg(data, 5);
+  const longAvg = rollingAvg(data, 25);
+  const maxV = Math.max(...values, ...longAvg) * 1.15;
+  const minV = 0;
+
+  function xAt(i) { return padL + (i / (data.length - 1)) * (w - padL - padR); }
+  function yAt(v) { return h - padB - ((v - minV) / (maxV - minV)) * (h - padT - padB); }
+
+  // grid
+  ctx.strokeStyle = '#2A303A';
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + (g / 4) * (h - padT - padB);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+  }
+
+  // station markers
+  const stationEvery = Math.max(1, Math.floor(data.length / STATIONS.length));
+  ctx.fillStyle = '#8A8F98';
+  ctx.font = '10px IBM Plex Mono';
+  STATIONS.forEach((name, si) => {
+    const idx = Math.min(data.length - 1, si * stationEvery);
+    const x = xAt(idx);
+    ctx.strokeStyle = '#2A303A';
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(x, padT, 3, 0, Math.PI * 2); ctx.fillStyle = '#E8E6DE'; ctx.fill();
+    ctx.save();
+    ctx.translate(x + 4, padT + 10);
+    ctx.rotate(0);
+    ctx.fillStyle = '#8A8F98';
+    ctx.fillText(name, 0, 0);
+    ctx.restore();
+  });
+
+  // cumulative / bigger averages — shaded band
+  ctx.beginPath();
+  ctx.moveTo(xAt(0), yAt(longAvg[0]));
+  longAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+  ctx.lineTo(xAt(data.length - 1), h - padB);
+  ctx.lineTo(xAt(0), h - padB);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(232,176,75,0.18)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(232,176,75,0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(xAt(0), yAt(longAvg[0]));
+  longAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+  ctx.stroke();
+
+  // averages — dashed mid line
+  ctx.strokeStyle = '#8A8F98';
+  ctx.setLineDash([5, 4]);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(xAt(0), yAt(shortAvg[0]));
+  shortAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // live — solid jagged line, colored by source
+  for (let i = 1; i < data.length; i++) {
+    ctx.strokeStyle = data[i].source === 'self' ? '#4FD1A5' : '#E8B04B';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xAt(i - 1), yAt(data[i - 1].value));
+    ctx.lineTo(xAt(i), yAt(data[i].value));
+    ctx.stroke();
+  }
+}
+
+/* ================================================================
+   Simulation loop — stands in for real BLE notifications until
+   the firmware side exists. Runs every 3s so the design is easy to
+   watch develop; drop to your real 60s cadence once wired to hardware.
+   ================================================================ */
+let simulating = true;
+setInterval(() => {
+  if (!simulating) return;  // real BLE notifications drive everything once connected
+
+  tick++;
+  const source = Math.random() < 0.7 ? 'self' : 'peer';
+
+  METRICS.forEach(m => pushMetricSample(m.id, generateSample(m.id, source)));
+  drawChart();
+
+  const latestPM = seriesData.pm[seriesData.pm.length - 1];
+  const latestSound = seriesData.sound[seriesData.sound.length - 1];
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  addLogRow({
+    time: timeStr,
+    source: source,
+    pm25: latestPM.value.toFixed(1),
+    pm10: (latestPM.value * 1.6).toFixed(1),
+    db: latestSound.value.toFixed(1)
+  });
+
+  if (Math.random() < 0.3) {
+    const eventType = Math.random() < 0.5 ? 'Sent' : 'Received';
+    const note = STATIONS[Math.floor(Math.random() * (STATIONS.length - 1))] + ' → ' +
+                 STATIONS[Math.floor(Math.random() * (STATIONS.length - 1)) + 1];
+    addMeshRow(eventType, timeStr, source, note);
+  }
+}, 3000);
+
+drawChart();
+</script>
+</body>
+</html>
