@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Undersensed — live view</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://googleapis.com">
+<link href="https://googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #12151A;
@@ -198,7 +198,7 @@
 
 <script>
 /* ================================================================
-   BLE data contract — Rebuilt to mirror NimBLE firmware layout
+   BLE data contract — Restored and aligned with NimBLE Firmware UUIDs
    ================================================================ */
 const UNDERSENSED_SERVICE_UUID   = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 const SENSOR_DATA_CHAR_UUID      = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'; 
@@ -230,7 +230,7 @@ async function connectBluetooth() {
   try {
     btStatus.innerHTML = '<span class="dot" style="background:#E8B04B"></span>Requesting Bluetooth Node selection window...';
     
-    // Hardened service-layer filter matches the NimBLE footprint directly
+    // Direct Service UUID filter allows robust discovery across desktop/mobile architectures
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [UNDERSENSED_SERVICE_UUID] }]
     });
@@ -239,20 +239,20 @@ async function connectBluetooth() {
     const server = await device.gatt.connect();
     const service = await server.getPrimaryService(UNDERSENSED_SERVICE_UUID);
 
-    // 1. Dispatch Spatial Reverse-Geolocation Time Sync Frame to setup clock
+    // 1. Automatic Time Synchronization Handshake
     try {
       const timeChar = await service.getCharacteristic(TIME_SYNC_CHAR_UUID);
       const nowSeconds = Math.floor(Date.now() / 1000);
       const timeArray = new ArrayBuffer(4);
       const timeView = new DataView(timeArray);
-      timeView.setUint32(0, nowSeconds, true); // Little-Endian serialization matching ESP32S3
+      timeView.setUint32(0, nowSeconds, true); // Little-Endian alignment matching ESP32S3
       await timeChar.writeValue(timeArray);
-      console.log(`Clock synchronization hook successful: ${nowSeconds} Epoch Seconds sent.`);
+      console.log(`Time synchronization completed: Sent ${nowSeconds} Unix Epoch seconds.`);
     } catch(tErr) {
       console.warn("Time Synchronization parameter omitted or failed:", tErr);
     }
 
-    // 2. Map Notification Channel Characteristics
+    // 2. Primary Telemetry Notification listener initialization
     const sensorChar = await service.getCharacteristic(SENSOR_DATA_CHAR_UUID);
     await sensorChar.startNotifications();
     sensorChar.addEventListener('characteristicvaluechanged', handleSensorNotification);
@@ -267,17 +267,14 @@ async function connectBluetooth() {
   }
 }
 
-// Full 66-byte Unpacking Deserialization Array Task (Little-Endian = true)
+// 66-byte packet parser block (Little-Endian = true)
 function handleSensorNotification(event) {
   const view = event.target.value;
   
   if (view.byteLength < 66) {
     console.warn(`Fragmented frame dropped: Received ${view.byteLength} bytes instead of 66.`);
     return;
-  }
-
-  // Exact binary deserialization mapping offsets from your frame architecture
-  const telemetry = {
+  }  const telemetry = {
     deviceId:      view.getUint32(0, true),
     timestamp:     view.getUint32(4, true),
     accelX:        view.getFloat32(8, true),
@@ -298,7 +295,6 @@ function handleSensorNotification(event) {
     sourceFlag:    view.getUint8(65)
   };
 
-  // Convert sentinel error registers safely for the visual grid rows
   const SENTINEL = -9999.0;
   const parseVal = (val, suffix = "") => Math.abs(val - SENTINEL) < 0.1 ? "Err" : `${val.toFixed(2)}${suffix}`;
 
@@ -306,14 +302,15 @@ function handleSensorNotification(event) {
 
   const timeStr = new Date().toLocaleTimeString();
   const sourceClass = telemetry.sourceFlag === 0 ? 'self' : 'peer';
-const sourceLabel = telemetry.sourceFlag === 0 ? 'Local' : `Mesh (Node ${telemetry.deviceId})`;
-  // Render Datalog layout row updates
-  const logRow = `<tr> 
-    <td>${timeStr}</td> 
-    <td class="${sourceClass}">${sourceLabel}</td> 
-    <td>${parseVal(telemetry.pm2_5)} ug/m3</td> 
-    <td>${parseVal(telemetry.pm10)} ug/m3</td> 
-    <td>${parseVal(telemetry.soundDb)} dB</td> 
+  const sourceLabel = telemetry.sourceFlag === 0 ? 'Local' : `Mesh (Node ${telemetry.deviceId})`;
+
+  // Render log elements to UI
+  const logRow = `<tr>  
+    <td>${timeStr}</td>  
+    <td class="${sourceClass}">${sourceLabel}</td>  
+    <td>${parseVal(telemetry.pm2_5)} ug/m3</td>  
+    <td>${parseVal(telemetry.pm10)} ug/m3</td>  
+    <td>${parseVal(telemetry.soundDb)} dB</td>  
   </tr>`;
 
   if (logBody.children.length > 8) {
@@ -322,12 +319,12 @@ const sourceLabel = telemetry.sourceFlag === 0 ? 'Local' : `Mesh (Node ${telemet
   }
   logBody.insertAdjacentHTML('afterbegin', logRow);
 
-  // Render Network mesh mapping database metrics (Mag/Pressure profiling arrays)
-  const meshRow = `<tr> 
-    <td>${telemetry.eventType}</td> 
-    <td class="mono">${telemetry.timestamp} ms</td> 
-    <td class="${sourceClass}">${sourceLabel}</td> 
-    <td>P: ${parseVal(telemetry.pressure)} hPa | Mag Vectors: [${parseVal(telemetry.magX)}, ${parseVal(telemetry.magY)}, ${parseVal(telemetry.magZ)}] uT</td> 
+  // Render spatial pressure and magnetism telemetry
+  const meshRow = `<tr>  
+    <td>${telemetry.eventType}</td>  
+    <td class="mono">${telemetry.timestamp} ms</td>  
+    <td class="${sourceClass}">${sourceLabel}</td>  
+    <td>P: ${parseVal(telemetry.pressure)} hPa | Mag Vectors: [${parseVal(telemetry.magX)}, ${parseVal(telemetry.magY)}, ${parseVal(telemetry.magZ)}] uT</td>  
   </tr>`;
 
   if (meshBody.children.length > 5) {
