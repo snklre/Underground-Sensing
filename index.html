@@ -198,7 +198,7 @@
 
 <script>
 /* ================================================================
-   BLE Data contract — Explicitly paired with NimBLE Firmware UUIDs
+   BLE Data contract — Aligned with NimBLE Firmware UUID architecture
    ================================================================ */
 const UNDERSENSED_SERVICE_UUID   = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 const SENSOR_DATA_CHAR_UUID      = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'; 
@@ -238,7 +238,7 @@ async function connectBluetooth() {
     const server = await device.gatt.connect();
     const service = await server.getPrimaryService(UNDERSENSED_SERVICE_UUID);
 
-    // 1. Dispatch Spatial Reverse-Geolocation Time Sync Frame
+    // 1. Dispatch Spatial Reverse-Geolocation Time Sync Handshake
     try {
       const timeChar = await service.getCharacteristic(TIME_SYNC_CHAR_UUID);
       const nowSeconds = Math.floor(Date.now() / 1000);
@@ -278,7 +278,7 @@ function handleSensorNotification(event) {
   const telemetry = {
     deviceId:      view.getUint32(0, true),
     timestamp:     view.getUint32(4, true),
-        accelX:        view.getFloat32(8, true),
+    accelX:        view.getFloat32(8, true),
     accelY:        view.getFloat32(12, true),
     accelZ:        view.getFloat32(16, true),
     magX:          view.getFloat32(20, true),
