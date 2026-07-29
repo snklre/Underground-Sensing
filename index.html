@@ -306,8 +306,7 @@ function handleSensorNotification(event) {
 
   const timeStr = new Date().toLocaleTimeString();
   const sourceClass = telemetry.sourceFlag === 0 ? 'self' : 'peer';
-  const sourceLabel = telemetry.sourceFlag === 0 ? 'Local' : `Mesh (Node ${telemetry.deviceId})`;
-
+const sourceLabel = telemetry.sourceFlag === 0 ? 'Local' : `Mesh (Node ${telemetry.deviceId})`;
   // Render Datalog layout row updates
   const logRow = `<tr> 
     <td>${timeStr}</td> 
