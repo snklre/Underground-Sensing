@@ -113,7 +113,7 @@
   th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
   td.self { color: var(--self); }
   td.peer { color: var(--peer); }
-  .table-scroll { max-height: 300px; overflow-y: auto; }
+  .table-scroll { max-height: 300px; overflow-y: auto; overflow-x: auto; }
 
   #archiveToggle {
     font-family: 'IBM Plex Mono', monospace;
@@ -179,7 +179,15 @@
       <h2>Datalog</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>Time</th><th>Sensor</th><th>PM2.5</th><th>PM10</th><th>dB</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Time</th><th>Sensor</th>
+              <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
+              <th>CO2</th><th>dB</th>
+              <th>Mag X</th><th>Mag Y</th><th>Mag Z</th>
+              <th>Pressure</th><th>Humidity</th><th>Gas Res.</th>
+            </tr>
+          </thead>
           <tbody id="logBody"></tbody>
         </table>
       </div>
@@ -187,7 +195,15 @@
       <div id="archivePane">
         <div class="table-scroll">
           <table>
-            <thead><tr><th>Time</th><th>Sensor</th><th>PM2.5</th><th>PM10</th><th>dB</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Time</th><th>Sensor</th>
+                <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
+                <th>CO2</th><th>dB</th>
+                <th>Mag X</th><th>Mag Y</th><th>Mag Z</th>
+                <th>Pressure</th><th>Humidity</th><th>Gas Res.</th>
+              </tr>
+            </thead>
             <tbody id="archiveBody"></tbody>
           </table>
         </div>
@@ -256,7 +272,7 @@ async function connectBluetooth() {
 }
 
 // Parses the 66-byte sensor packet — offsets must match the firmware's
-// notifySensorData() exactly (see the header comment in the .ino file).
+// SensorPacket struct / notifyBLE() exactly (see the header comment in the .ino file).
 function handleSensorNotification(event) {
   const v = event.target.value; // DataView
   const ERROR_VALUE = -9999;
@@ -267,9 +283,11 @@ function handleSensorNotification(event) {
 
   const deviceId = v.getUint32(0, true);
   const accelX = readOrNull(8), accelY = readOrNull(12), accelZ = readOrNull(16);
+  const magX = readOrNull(20), magY = readOrNull(24), magZ = readOrNull(28);
   const pressure = readOrNull(32);
   const co2 = readOrNull(36);
   const soundDb = readOrNull(40);
+  const pm1 = readOrNull(44);
   const pm25 = readOrNull(48);
   const pm10 = readOrNull(52);
   const humidity = readOrNull(56);
@@ -279,20 +297,38 @@ function handleSensorNotification(event) {
 
   tick++;
   if (soundDb !== null) pushMetricSample('sound', { t: tick, value: soundDb, source });
-  if (pm25 !== null) pushMetricSample('pm', { t: tick, value: pm25, source });
-  if (gasResistance !== null) pushMetricSample('voc', { t: tick, value: gasResistance, source });
+  if (pm1 !== null) pushMetricSample('pm1', { t: tick, value: pm1, source });
+  if (pm25 !== null) pushMetricSample('pm25', { t: tick, value: pm25, source });
+  if (pm10 !== null) pushMetricSample('pm10', { t: tick, value: pm10, source });
   if (co2 !== null) pushMetricSample('co2', { t: tick, value: co2, source });
+  if (magX !== null) pushMetricSample('magX', { t: tick, value: magX, source });
+  if (magY !== null) pushMetricSample('magY', { t: tick, value: magY, source });
+  if (magZ !== null) pushMetricSample('magZ', { t: tick, value: magZ, source });
+  if (pressure !== null) pushMetricSample('pressure', { t: tick, value: pressure, source });
   if (humidity !== null) pushMetricSample('humidity', { t: tick, value: humidity, source });
+  if (gasResistance !== null) pushMetricSample('gas', { t: tick, value: gasResistance, source });
   drawChart();
 
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   addLogRow({
     time: timeStr,
     source: source,
-    pm25: pm25 !== null ? pm25.toFixed(1) : 'error',
-    pm10: pm10 !== null ? pm10.toFixed(1) : 'error',
-    db: soundDb !== null ? soundDb.toFixed(1) : 'error'
+    pm1: fmt(pm1, 1),
+    pm25: fmt(pm25, 1),
+    pm10: fmt(pm10, 1),
+    co2: fmt(co2, 0),
+    db: fmt(soundDb, 1),
+    magX: fmt(magX, 2),
+    magY: fmt(magY, 2),
+    magZ: fmt(magZ, 2),
+    pressure: fmt(pressure, 1),
+    humidity: fmt(humidity, 1),
+    gas: fmt(gasResistance, 0)
   });
+}
+
+function fmt(val, decimals) {
+  return val !== null && val !== undefined ? val.toFixed(decimals) : 'error';
 }
 
 // Parses mesh event text, e.g. "Sent,status:ok" or "Received,device:2"
@@ -311,10 +347,16 @@ function handleMeshNotification(event) {
    ================================================================ */
 const METRICS = [
   { id: 'sound', label: 'Sound', unit: 'dB' },
-  { id: 'pm', label: 'Air particulate', unit: 'µg/m³' },
-  { id: 'voc', label: 'VOC', unit: 'ppb' },
+  { id: 'pm1', label: 'PM1.0', unit: 'µg/m³' },
+  { id: 'pm25', label: 'PM2.5', unit: 'µg/m³' },
+  { id: 'pm10', label: 'PM10', unit: 'µg/m³' },
   { id: 'co2', label: 'CO2', unit: 'ppm' },
+  { id: 'magX', label: 'Mag X', unit: 'µT' },
+  { id: 'magY', label: 'Mag Y', unit: 'µT' },
+  { id: 'magZ', label: 'Mag Z', unit: 'µT' },
+  { id: 'pressure', label: 'Pressure', unit: 'hPa' },
   { id: 'humidity', label: 'Humidity', unit: '%' },
+  { id: 'gas', label: 'Gas Resistance', unit: 'Ohms' },
 ];
 let activeMetric = METRICS[0].id;
 const seriesData = {}; // metricId -> array of {t, value, source}
@@ -338,18 +380,24 @@ METRICS.forEach(m => {
 });
 
 function baselineFor(metricId) {
-  return { sound: 55, pm: 12, voc: 80, co2: 550, humidity: 60 }[metricId];
+  return {
+    sound: 55, pm1: 3, pm25: 12, pm10: 18, co2: 550,
+    magX: 20, magY: -20, magZ: 55, pressure: 1010, humidity: 55, gas: 13000
+  }[metricId];
 }
 function spikeChanceFor(metricId) {
-  return { sound: 0.12, pm: 0.08, voc: 0.05, co2: 0.06, humidity: 0.03 }[metricId];
+  return {
+    sound: 0.12, pm1: 0.06, pm25: 0.08, pm10: 0.08, co2: 0.06,
+    magX: 0.04, magY: 0.04, magZ: 0.04, pressure: 0.02, humidity: 0.03, gas: 0.05
+  }[metricId];
 }
 
 let tick = 0;
 function generateSample(metricId, source) {
   const base = baselineFor(metricId);
-  const noise = (Math.random() - 0.5) * base * 0.15;
-  const spike = Math.random() < spikeChanceFor(metricId) ? base * (0.6 + Math.random() * 0.9) : 0;
-  return { t: tick, value: Math.max(0, base + noise + spike), source };
+  const noise = (Math.random() - 0.5) * Math.abs(base) * 0.15;
+  const spike = Math.random() < spikeChanceFor(metricId) ? Math.abs(base) * (0.6 + Math.random() * 0.9) : 0;
+  return { t: tick, value: base + noise + spike, source };
 }
 
 function pushMetricSample(metricId, sample) {
@@ -378,7 +426,10 @@ function addLogRow(row) {
 }
 function rowHTML(row) {
   return `<td>${row.time}</td><td class="${row.source}">${row.source}</td>` +
-         `<td>${row.pm25}</td><td>${row.pm10}</td><td>${row.db}</td>`;
+         `<td>${row.pm1}</td><td>${row.pm25}</td><td>${row.pm10}</td>` +
+         `<td>${row.co2}</td><td>${row.db}</td>` +
+         `<td>${row.magX}</td><td>${row.magY}</td><td>${row.magZ}</td>` +
+         `<td>${row.pressure}</td><td>${row.humidity}</td><td>${row.gas}</td>`;
 }
 function renderLog() {
   logBody.innerHTML = liveRows.map(r => `<tr>${rowHTML(r)}</tr>`).join('');
@@ -426,7 +477,7 @@ function drawChart() {
   const shortAvg = rollingAvg(data, 5);
   const longAvg = rollingAvg(data, 25);
   const maxV = Math.max(...values, ...longAvg) * 1.15;
-  const minV = 0;
+  const minV = Math.min(0, Math.min(...values) * 1.15);
 
   function xAt(i) { return padL + (i / (data.length - 1)) * (w - padL - padR); }
   function yAt(v) { return h - padB - ((v - minV) / (maxV - minV)) * (h - padT - padB); }
@@ -511,15 +562,22 @@ setInterval(() => {
   METRICS.forEach(m => pushMetricSample(m.id, generateSample(m.id, source)));
   drawChart();
 
-  const latestPM = seriesData.pm[seriesData.pm.length - 1];
-  const latestSound = seriesData.sound[seriesData.sound.length - 1];
+  const latest = (id) => seriesData[id][seriesData[id].length - 1];
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   addLogRow({
     time: timeStr,
     source: source,
-    pm25: latestPM.value.toFixed(1),
-    pm10: (latestPM.value * 1.6).toFixed(1),
-    db: latestSound.value.toFixed(1)
+    pm1: latest('pm1').value.toFixed(1),
+    pm25: latest('pm25').value.toFixed(1),
+    pm10: latest('pm10').value.toFixed(1),
+    co2: latest('co2').value.toFixed(0),
+    db: latest('sound').value.toFixed(1),
+    magX: latest('magX').value.toFixed(2),
+    magY: latest('magY').value.toFixed(2),
+    magZ: latest('magZ').value.toFixed(2),
+    pressure: latest('pressure').value.toFixed(1),
+    humidity: latest('humidity').value.toFixed(1),
+    gas: latest('gas').value.toFixed(0)
   });
 
   if (Math.random() < 0.3) {
