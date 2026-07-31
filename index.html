@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Underground Sensing - live </title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #12151A;
@@ -23,10 +22,10 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: 'Space Grotesk', sans-serif;
+    font-family: Arial, sans-serif;
     padding: 24px;
   }
-  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .mono { font-family: Arial, sans-serif; }
   header {
     display: flex;
     justify-content: space-between;
@@ -48,7 +47,7 @@
     background: var(--self);
     color: #0A1410;
     border: none;
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: Arial, sans-serif;
     font-weight: 600;
     font-size: 12px;
     padding: 10px 16px;
@@ -58,7 +57,7 @@
   }
   #connectBtn:hover { opacity: 0.85; }
   #btStatus {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: Arial, sans-serif;
     font-size: 11px;
     color: var(--text-dim);
     margin-top: 6px;
@@ -92,7 +91,7 @@
 
   .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
   .tab {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: Arial, sans-serif;
     font-size: 11px;
     padding: 6px 10px;
     border: 1px solid var(--line);
@@ -103,12 +102,12 @@
   }
   .tab.active { color: var(--bg); background: var(--self); border-color: var(--self); }
 
-  .legend { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); margin-bottom: 8px; display: flex; gap: 16px; }
+  .legend { font-family: Arial, sans-serif; font-size: 11px; color: var(--text-dim); margin-bottom: 8px; display: flex; gap: 16px; }
   .legend .swatch { display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; }
 
   canvas { width: 100%; display: block; }
 
-  table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; }
+  table { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 11.5px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
   td.self { color: var(--self); }
@@ -116,7 +115,7 @@
   .table-scroll { max-height: 300px; overflow-y: auto; overflow-x: auto; }
 
   #archiveToggle {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: Arial, sans-serif;
     font-size: 11px;
     color: var(--text-dim);
     background: none;
@@ -132,7 +131,7 @@
   #archivePane { display: none; margin-top: 10px; }
 
   .note {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: Arial, sans-serif;
     font-size: 10.5px;
     color: var(--text-dim);
     margin-top: 6px;
@@ -493,7 +492,7 @@ function drawChart() {
   // station markers
   const stationEvery = Math.max(1, Math.floor(data.length / STATIONS.length));
   ctx.fillStyle = '#8A8F98';
-  ctx.font = '10px IBM Plex Mono';
+  ctx.font = '10px Arial';
   STATIONS.forEach((name, si) => {
     const idx = Math.min(data.length - 1, si * stationEvery);
     const x = xAt(idx);
