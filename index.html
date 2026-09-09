@@ -759,13 +759,15 @@ function pixelReadLatest() {
   return {
     pm25, sound,
     density: Math.min(1, Math.max(0.04, (pm25 + pm10 * 0.5) / 70)),
-    chaos: Math.min(1, Math.max(0.05, (sound - 40) / 60)),
+    // Raised floor (baseline sound ~55dB) — quiet, steady conditions stay
+    // near-still; only real spikes above baseline push chaos up.
+    chaos: Math.min(1, Math.max(0.015, (sound - 58) / 55)),
   };
 }
 
 function stepPixelField() {
   const { density, chaos } = pixelReadLatest();
-  const flickerCount = Math.round(pixelGrid.length * (0.03 + chaos * 0.32));
+  const flickerCount = Math.round(pixelGrid.length * (0.008 + chaos * 0.18));
   for (let i = 0; i < flickerCount; i++) {
     const idx = Math.floor(Math.random() * pixelGrid.length);
     pixelGrid[idx] = Math.random() < density ? 0.55 + Math.random() * 0.45 : Math.random() * 0.3;
@@ -791,7 +793,7 @@ function drawPixelField() {
 
 let pixelLastFrame = 0;
 function pixelLoop(ts) {
-  if (!pixelLastFrame || ts - pixelLastFrame > 90) { // ~11fps — reads as static/grain, not smooth animation
+  if (!pixelLastFrame || ts - pixelLastFrame > 140) { // ~7fps — calmer, less constant motion
     pixelLastFrame = ts;
     stepPixelField();
     drawPixelField();
