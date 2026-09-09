@@ -195,48 +195,6 @@
   }
   .field-actions .btn { flex: 1; font-size: 13px; min-height: 52px; }
 
-  .line-map-wrap {
-    max-height: 520px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    border: 1px solid var(--line);
-    border-radius: 2px;
-    background: var(--bg);
-    padding: 10px 0;
-  }
-  .line-map-wrap svg { display: block; margin: 0 auto; }
-  .stop-line { stroke: var(--accent); stroke-width: 3; fill: none; }
-  .stop-dot {
-    fill: var(--panel);
-    stroke: var(--accent);
-    stroke-width: 2.5;
-    cursor: pointer;
-  }
-  .stop-dot:active { fill: var(--accent-dim); }
-  .stop-dot.nearest { stroke: var(--ink); stroke-width: 3.5; }
-  .stop-dot.selected { fill: var(--ink); stroke: var(--ink); }
-  .stop-label {
-    font-family: var(--font-main);
-    font-size: 8.5px;
-    fill: var(--ink-dim);
-    cursor: pointer;
-    user-select: none;
-  }
-  .stop-label.terminus { font-weight: 700; fill: var(--ink); }
-  .stop-label.selected { fill: var(--ink); font-weight: 700; }
-  .map-legend {
-    font-family: var(--font-main);
-    font-size: 10.5px;
-    color: var(--ink-dim);
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-top: 8px;
-  }
-  .map-legend .dot-sample { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; border: 2px solid var(--accent); background: var(--panel); }
-  .map-legend .dot-sample.nearest-sample { border-color: var(--ink); border-width: 3px; }
-  .map-legend .dot-sample.selected-sample { background: var(--ink); border-color: var(--ink); }
-
   .field-entry { padding: 10px 0; border-bottom: 1px solid var(--line); }
   .field-entry:last-child { border-bottom: none; }
   .field-entry-main { display: flex; justify-content: space-between; font-family: var(--font-main); font-size: 12px; }
@@ -343,19 +301,6 @@
       <div class="geo-coords mono" id="geoCoords">—, —</div>
       <div class="geo-meta" id="geoMeta">Location not enabled</div>
       <button id="geoEnableBtn" class="btn btn-outline geo-enable">Enable location</button>
-    </div>
-
-    <div class="panel">
-      <h2>Line Map<span class="hint">tap to georeference</span></h2>
-      <div class="line-map-wrap" id="lineMapWrap">
-        <svg id="lineMapSvg" viewBox="0 0 340 960" xmlns="http://www.w3.org/2000/svg"></svg>
-      </div>
-      <div class="map-legend">
-        <span><span class="dot-sample"></span>stop</span>
-        <span><span class="dot-sample nearest-sample"></span>nearest (GPS)</span>
-        <span><span class="dot-sample selected-sample"></span>selected</span>
-      </div>
-      <div class="geo-meta" id="mapSelectedLabel">No stop selected — tap one below, or rely on GPS.</div>
     </div>
 
     <div class="panel">
@@ -481,80 +426,14 @@ let activeMetric = CHART_METRICS[0].id;
 const seriesData = {};
 METRICS.forEach(m => seriesData[m.id] = []);
 
-// Real Central line stations (West Ruislip/Ealing Broadway – Epping, incl.
-// Hainault Loop) — used for field geolocation AND for the Line Map SVG
-// below. x/y are layout coordinates for the vertical diagram, not geographic.
+// Real Northern line (Edgware branch) stations — also used for field geolocation.
 const STATIONS = [
-  // West Ruislip branch — main trunk
-  { id: 'west_ruislip',       name: 'West Ruislip',      lat: 51.569587, lon: -0.437860, branch: 'main', x: 200, y: 40 },
-  { id: 'ruislip_gardens',    name: 'Ruislip Gardens',    lat: 51.559960, lon: -0.409294, branch: 'main', x: 200, y: 64 },
-  { id: 'south_ruislip',      name: 'South Ruislip',      lat: 51.556890, lon: -0.399116, branch: 'main', x: 200, y: 88 },
-  { id: 'northolt',           name: 'Northolt',           lat: 51.548212, lon: -0.368441, branch: 'main', x: 200, y: 112 },
-  { id: 'greenford',          name: 'Greenford',          lat: 51.541980, lon: -0.345879, branch: 'main', x: 200, y: 136 },
-  { id: 'perivale',           name: 'Perivale',           lat: 51.536341, lon: -0.323070, branch: 'main', x: 200, y: 160 },
-  { id: 'hanger_lane',        name: 'Hanger Lane',        lat: 51.530072, lon: -0.292996, branch: 'main', x: 200, y: 184 },
-  { id: 'north_acton',        name: 'North Acton',        lat: 51.523432, lon: -0.259730, branch: 'main', x: 200, y: 208 },
-  { id: 'east_acton',         name: 'East Acton',         lat: 51.516263, lon: -0.248112, branch: 'main', x: 200, y: 232 },
-  { id: 'white_city',         name: 'White City',         lat: 51.512232, lon: -0.224632, branch: 'main', x: 200, y: 256 },
-  { id: 'shepherds_bush',     name: "Shepherd's Bush",    lat: 51.504532, lon: -0.218519, branch: 'main', x: 200, y: 280 },
-  { id: 'holland_park',       name: 'Holland Park',       lat: 51.507146, lon: -0.206558, branch: 'main', x: 200, y: 304 },
-  { id: 'notting_hill_gate',  name: 'Notting Hill Gate',  lat: 51.509375, lon: -0.195922, branch: 'main', x: 200, y: 328 },
-  { id: 'queensway',          name: 'Queensway',          lat: 51.510449, lon: -0.187420, branch: 'main', x: 200, y: 352 },
-  { id: 'lancaster_gate',     name: 'Lancaster Gate',     lat: 51.511891, lon: -0.175430, branch: 'main', x: 200, y: 376 },
-  { id: 'marble_arch',        name: 'Marble Arch',        lat: 51.513965, lon: -0.158571, branch: 'main', x: 200, y: 400 },
-  { id: 'bond_street',        name: 'Bond Street',        lat: 51.513797, lon: -0.149614, branch: 'main', x: 200, y: 424 },
-  { id: 'oxford_circus',      name: 'Oxford Circus',      lat: 51.515223, lon: -0.140836, branch: 'main', x: 200, y: 448 },
-  { id: 'tottenham_court_road', name: 'Tottenham Court Road', lat: 51.516211, lon: -0.131110, branch: 'main', x: 200, y: 472 },
-  { id: 'holborn',            name: 'Holborn',            lat: 51.517236, lon: -0.119841, branch: 'main', x: 200, y: 496 },
-  { id: 'chancery_lane',      name: 'Chancery Lane',      lat: 51.518494, lon: -0.111962, branch: 'main', x: 200, y: 520 },
-  { id: 'st_pauls',           name: "St. Paul's",         lat: 51.514835, lon: -0.097571, branch: 'main', x: 200, y: 544 },
-  { id: 'bank',               name: 'Bank',                lat: 51.513347, lon: -0.089000, branch: 'main', x: 200, y: 568 },
-  { id: 'liverpool_street',   name: 'Liverpool Street',   lat: 51.517598, lon: -0.082250, branch: 'main', x: 200, y: 592 },
-  { id: 'bethnal_green',      name: 'Bethnal Green',      lat: 51.527192, lon: -0.055392, branch: 'main', x: 200, y: 616 },
-  { id: 'mile_end',           name: 'Mile End',           lat: 51.525311, lon: -0.032666, branch: 'main', x: 200, y: 640 },
-  { id: 'stratford',          name: 'Stratford',          lat: 51.541693, lon: -0.003752, branch: 'main', x: 200, y: 664 },
-  { id: 'leyton',             name: 'Leyton',              lat: 51.558132, lon: -0.006465, branch: 'main', x: 200, y: 688 },
-  { id: 'leytonstone',        name: 'Leytonstone',        lat: 51.568522, lon: 0.009140,  branch: 'main', x: 200, y: 712 },
-  { id: 'snaresbrook',        name: 'Snaresbrook',        lat: 51.580891, lon: 0.021464,  branch: 'main', x: 200, y: 736 },
-  { id: 'south_woodford',     name: 'South Woodford',     lat: 51.591553, lon: 0.027943,  branch: 'main', x: 200, y: 760 },
-  { id: 'woodford',           name: 'Woodford',           lat: 51.607202, lon: 0.034056,  branch: 'main', x: 200, y: 784 },
-  { id: 'buckhurst_hill',     name: 'Buckhurst Hill',     lat: 51.626577, lon: 0.046713,  branch: 'main', x: 200, y: 808 },
-  { id: 'loughton',           name: 'Loughton',            lat: 51.641571, lon: 0.055279,  branch: 'main', x: 200, y: 832 },
-  { id: 'debden',             name: 'Debden',              lat: 51.645492, lon: 0.083801,  branch: 'main', x: 200, y: 856 },
-  { id: 'theydon_bois',       name: 'Theydon Bois',       lat: 51.672552, lon: 0.102891,  branch: 'main', x: 200, y: 880 },
-  { id: 'epping',             name: 'Epping',              lat: 51.693686, lon: 0.113826,  branch: 'main', x: 200, y: 904 },
-  // Ealing Broadway branch — joins the trunk at North Acton
-  { id: 'ealing_broadway',    name: 'Ealing Broadway',    lat: 51.514861, lon: -0.302010, branch: 'ealing', x: 90, y: 184 },
-  { id: 'west_acton',         name: 'West Acton',         lat: 51.517770, lon: -0.280657, branch: 'ealing', x: 90, y: 208 },
-  // Hainault Loop — splits from Leytonstone, rejoins at Woodford
-  { id: 'wanstead',           name: 'Wanstead',            lat: 51.574902, lon: 0.028760,  branch: 'hainault', x: 110, y: 712 },
-  { id: 'redbridge',          name: 'Redbridge',           lat: 51.576367, lon: 0.045394,  branch: 'hainault', x: 110, y: 736 },
-  { id: 'gants_hill',         name: 'Gants Hill',          lat: 51.576553, lon: 0.066084,  branch: 'hainault', x: 110, y: 760 },
-  { id: 'newbury_park',       name: 'Newbury Park',        lat: 51.575639, lon: 0.090303,  branch: 'hainault', x: 110, y: 784 },
-  { id: 'barkingside',        name: 'Barkingside',         lat: 51.585851, lon: 0.088477,  branch: 'hainault', x: 110, y: 808 },
-  { id: 'fairlop',            name: 'Fairlop',             lat: 51.596110, lon: 0.090593,  branch: 'hainault', x: 110, y: 832 },
-  { id: 'hainault',           name: 'Hainault',            lat: 51.602845, lon: 0.094109,  branch: 'hainault', x: 110, y: 856 },
-  { id: 'grange_hill',        name: 'Grange Hill',         lat: 51.613481, lon: 0.092273,  branch: 'hainault', x: 110, y: 880 },
-  { id: 'chigwell',           name: 'Chigwell',            lat: 51.617858, lon: 0.076179,  branch: 'hainault', x: 110, y: 904 },
-  { id: 'roding_valley',      name: 'Roding Valley',       lat: 51.616957, lon: 0.044026,  branch: 'hainault', x: 110, y: 928 },
+  { name: 'Hampstead',     lat: 51.5566, lon: -0.1780 },
+  { name: 'Golders Green', lat: 51.5724, lon: -0.1949 },
+  { name: 'Brent Cross',   lat: 51.5765, lon: -0.2136 },
+  { name: 'Colindale',     lat: 51.5989, lon: -0.2495 },
+  { name: 'Burnt Oak',     lat: 51.6136, lon: -0.2642 },
 ];
-const STATION_BY_ID = {};
-STATIONS.forEach(s => STATION_BY_ID[s.id] = s);
-
-// Line segments to draw in the Line Map SVG: sequential trunk pairs, plus
-// the two branch splits/joins (Ealing Broadway branch, Hainault Loop).
-const LINE_SEGMENTS = [];
-const MAIN_SEQ = STATIONS.filter(s => s.branch === 'main').map(s => s.id);
-for (let i = 0; i < MAIN_SEQ.length - 1; i++) LINE_SEGMENTS.push([MAIN_SEQ[i], MAIN_SEQ[i + 1]]);
-LINE_SEGMENTS.push(['ealing_broadway', 'west_acton'], ['west_acton', 'north_acton']);
-const HAINAULT_SEQ = STATIONS.filter(s => s.branch === 'hainault').map(s => s.id);
-LINE_SEGMENTS.push(['leytonstone', HAINAULT_SEQ[0]]);
-for (let i = 0; i < HAINAULT_SEQ.length - 1; i++) LINE_SEGMENTS.push([HAINAULT_SEQ[i], HAINAULT_SEQ[i + 1]]);
-LINE_SEGMENTS.push([HAINAULT_SEQ[HAINAULT_SEQ.length - 1], 'woodford']);
-const TERMINI = new Set(['west_ruislip', 'ealing_broadway', 'epping']);
-// Trend chart walks the main West Ruislip–Epping trunk only (branches would
-// make a single left-to-right "journey" axis nonsensical).
-const CHART_STATIONS = STATIONS.filter(s => s.branch === 'main');
 
 const tabsEl = document.getElementById('metricTabs');
 CHART_METRICS.forEach(m => {
@@ -670,9 +549,9 @@ function drawChart() {
   }
 
   const showLabels = w >= 520;
-  const stationEvery = Math.max(1, Math.floor(data.length / CHART_STATIONS.length));
+  const stationEvery = Math.max(1, Math.floor(data.length / STATIONS.length));
   ctx.font = '10px Arial, sans-serif';
-  CHART_STATIONS.forEach((s, si) => {
+  STATIONS.forEach((s, si) => {
     const idx = Math.min(data.length - 1, si * stationEvery);
     const x = xAt(idx);
     ctx.strokeStyle = PALETTE.line;
@@ -741,48 +620,6 @@ function nearestStation(lat, lon) {
   return { station: best, distance: bestDist };
 }
 
-/* ---- Line Map — vertical SVG diagram, tap a stop to georeference ---- */
-const lineMapSvg = document.getElementById('lineMapSvg');
-const mapSelectedLabel = document.getElementById('mapSelectedLabel');
-let selectedStationId = null;
-
-function buildLineMap() {
-  const lines = LINE_SEGMENTS.map(([a, b]) => {
-    const sa = STATION_BY_ID[a], sb = STATION_BY_ID[b];
-    return `<line class="stop-line" x1="${sa.x}" y1="${sa.y}" x2="${sb.x}" y2="${sb.y}"></line>`;
-  }).join('');
-  const marks = STATIONS.map(s => {
-    const isTerm = TERMINI.has(s.id);
-    const onMain = s.branch === 'main';
-    const lx = onMain ? s.x + 10 : s.x - 10;
-    return `<circle class="stop-dot" data-id="${s.id}" cx="${s.x}" cy="${s.y}" r="${isTerm ? 5 : 4}"></circle>` +
-      `<text class="stop-label${isTerm ? ' terminus' : ''}" data-id="${s.id}" x="${lx}" y="${s.y + 3}" text-anchor="${onMain ? 'start' : 'end'}">${s.name}</text>`;
-  }).join('');
-  lineMapSvg.innerHTML = lines + marks;
-  lineMapSvg.querySelectorAll('.stop-dot, .stop-label').forEach(el => {
-    el.addEventListener('click', () => selectStation(el.dataset.id));
-  });
-}
-
-function selectStation(id) {
-  selectedStationId = (selectedStationId === id) ? null : id;
-  lineMapSvg.querySelectorAll('.stop-dot, .stop-label').forEach(el => {
-    el.classList.toggle('selected', el.dataset.id === selectedStationId);
-  });
-  if (selectedStationId) {
-    mapSelectedLabel.innerHTML = '<span class="dot self"></span>Selected: <strong>' + STATION_BY_ID[selectedStationId].name + '</strong> — CHECK IN / TAG STOP will log here.';
-  } else {
-    mapSelectedLabel.textContent = 'No stop selected — tap one above, or rely on GPS.';
-  }
-  if (navigator.vibrate) navigator.vibrate(15);
-}
-
-function markNearestOnMap(id) {
-  lineMapSvg.querySelectorAll('.stop-dot').forEach(el => el.classList.toggle('nearest', el.dataset.id === id));
-}
-
-buildLineMap();
-
 let currentPos = null;
 const geoCoords = document.getElementById('geoCoords');
 const geoMeta = document.getElementById('geoMeta');
@@ -803,7 +640,6 @@ function onPosition(pos) {
   geoCoords.textContent = currentPos.lat.toFixed(5) + ', ' + currentPos.lon.toFixed(5);
   const near = nearestStation(currentPos.lat, currentPos.lon);
   geoMeta.innerHTML = '<span class="dot self"></span>±' + Math.round(currentPos.accuracy) + 'm · near ' + near.station.name + ' (' + Math.round(near.distance) + 'm)';
-  markNearestOnMap(near.station.id);
 }
 function onPositionError(err) {
   geoMeta.innerHTML = '<span class="dot" style="background:var(--error)"></span>' + (err.code === 1 ? 'Location permission denied' : 'Location unavailable');
@@ -817,25 +653,18 @@ const fieldCount = document.getElementById('fieldCount');
 const noteInput = document.getElementById('noteInput');
 
 function addFieldEntry(type) {
-  // A tap on the Line Map always wins over GPS: the Underground has no
-  // signal in the tunnels, so manual station selection is the primary way
-  // to georeference a note while doing fieldwork on the platform.
-  const selected = selectedStationId ? STATION_BY_ID[selectedStationId] : null;
-  const near = !selected && currentPos ? nearestStation(currentPos.lat, currentPos.lon) : null;
-  const station = selected || (near ? near.station : null);
+  const near = currentPos ? nearestStation(currentPos.lat, currentPos.lon) : null;
   const entry = {
     id: Date.now(),
     type,
     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    lat: selected ? selected.lat.toFixed(5) : (currentPos ? currentPos.lat.toFixed(5) : '—'),
-    lon: selected ? selected.lon.toFixed(5) : (currentPos ? currentPos.lon.toFixed(5) : '—'),
-    station: station ? station.name : '—',
-    source: selected ? 'map tag' : (currentPos ? 'GPS' : '—'),
+    lat: currentPos ? currentPos.lat.toFixed(5) : '—',
+    lon: currentPos ? currentPos.lon.toFixed(5) : '—',
+    station: near ? near.station.name : '—',
     note: noteInput.value.trim()
   };
   fieldLog.unshift(entry);
   noteInput.value = '';
-  if (selectedStationId) selectStation(selectedStationId); // clears selection + map highlight
   renderFieldLog();
   if (navigator.vibrate) navigator.vibrate(type === 'Check-in' ? 40 : [20, 40, 20]);
 }
@@ -850,7 +679,7 @@ function renderFieldLog() {
         <span class="field-entry-type ${e.type === 'Check-in' ? 'accent' : ''}">${e.type}</span>
         <span class="field-entry-time mono">${e.time}</span>
       </div>
-      <div class="field-entry-meta">${e.station} · ${e.lat}, ${e.lon}${e.source ? ' · ' + e.source : ''}</div>
+      <div class="field-entry-meta">${e.station} · ${e.lat}, ${e.lon}</div>
       ${e.note ? `<div class="field-entry-note">"${e.note}"</div>` : ''}
     </div>`).join('');
   fieldLogList.querySelectorAll('.field-entry-del').forEach(btn => {
@@ -866,8 +695,8 @@ document.getElementById('tagStopBtn').addEventListener('click', () => addFieldEn
 
 document.getElementById('exportBtn').addEventListener('click', () => {
   if (!fieldLog.length) return;
-  const header = 'type,time,lat,lon,station,source,note\n';
-  const rows = fieldLog.map(e => [e.type, e.time, e.lat, e.lon, e.station, e.source || '', '"' + e.note.replace(/"/g, '""') + '"'].join(',')).join('\n');
+  const header = 'type,time,lat,lon,station,note\n';
+  const rows = fieldLog.map(e => [e.type, e.time, e.lat, e.lon, e.station, '"' + e.note.replace(/"/g, '""') + '"'].join(',')).join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
