@@ -12,8 +12,8 @@
     --line: #DEDCD4;
     --ink: #15140F;
     --ink-dim: #75736A;
-    --accent: #FF4B22;
-    --accent-dim: #FFDACB;
+    --accent: #FFED00;
+    --accent-dim: #FFF9B3;
     --peer: #A8A69C;
     --error: #B23A2A;
     --font-main: Arial, Helvetica, sans-serif;
@@ -76,7 +76,7 @@
   }
   .btn-sm { padding: 8px 12px; font-size: 11px; min-height: 34px; }
   .btn-outline { background: transparent; }
-  .btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn-accent { background: var(--accent); border-color: var(--accent); color: var(--ink); font-weight: 600; }
   .btn-ghost { border: 1px dashed var(--line); color: var(--ink-dim); background: none; }
   .btn:active { transform: translateY(1px); }
   .btn-block { width: 100%; }
@@ -138,6 +138,14 @@
   .legend .swatch { display: inline-block; width: 12px; height: 3px; margin-right: 4px; vertical-align: middle; }
 
   canvas { width: 100%; display: block; }
+  #pixelViz { border-radius: 2px; background: var(--bg); max-width: 460px; margin: 0 auto; aspect-ratio: 1 / 1; }
+  .pixel-readout {
+    font-family: var(--font-main);
+    font-size: 11px;
+    color: var(--ink-dim);
+    letter-spacing: 0.02em;
+    margin-top: 8px;
+  }
 
   table { width: 100%; border-collapse: collapse; font-family: var(--font-main); font-size: 12px; }
   .data-table { font-family: var(--font-mono); font-size: 11px; }
@@ -205,16 +213,17 @@
     padding: 10px 0;
   }
   .line-map-wrap svg { display: block; margin: 0 auto; }
-  .stop-line { stroke: var(--accent); stroke-width: 3; fill: none; }
+  .stop-line { stroke: var(--ink); stroke-width: 3; fill: none; }
   .stop-dot {
     fill: var(--panel);
-    stroke: var(--accent);
+    stroke: var(--ink);
     stroke-width: 2.5;
     cursor: pointer;
   }
   .stop-dot:active { fill: var(--accent-dim); }
   .stop-dot.nearest { stroke: var(--ink); stroke-width: 3.5; }
   .stop-dot.selected { fill: var(--ink); stroke: var(--ink); }
+  .stop-dot.tagged { fill: var(--accent); stroke: var(--accent); stroke-width: 2.5; }
   .stop-label {
     font-family: var(--font-main);
     font-size: 8.5px;
@@ -233,15 +242,16 @@
     flex-wrap: wrap;
     margin-top: 8px;
   }
-  .map-legend .dot-sample { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; border: 2px solid var(--accent); background: var(--panel); }
+  .map-legend .dot-sample { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; border: 2px solid var(--ink); background: var(--panel); }
   .map-legend .dot-sample.nearest-sample { border-color: var(--ink); border-width: 3px; }
   .map-legend .dot-sample.selected-sample { background: var(--ink); border-color: var(--ink); }
+  .map-legend .dot-sample.tagged-sample { background: var(--accent); border-color: var(--accent); }
 
   .field-entry { padding: 10px 0; border-bottom: 1px solid var(--line); }
   .field-entry:last-child { border-bottom: none; }
   .field-entry-main { display: flex; justify-content: space-between; font-family: var(--font-main); font-size: 12px; }
   .field-entry-type { font-weight: 600; }
-  .field-entry-type.accent { color: var(--accent); }
+  .field-entry-type.accent { background: var(--accent); color: var(--ink); padding: 1px 6px; border-radius: 2px; }
   .field-entry-time { color: var(--ink-dim); }
   .field-entry-meta { font-family: var(--font-main); font-size: 11px; color: var(--ink-dim); margin-top: 3px; }
   .field-entry-note { font-size: 12.5px; margin-top: 3px; font-style: italic; }
@@ -278,6 +288,13 @@
 <div class="views">
 
   <div id="monitorView" class="view active">
+    <div class="panel">
+      <h2>Signal Field<span class="hint">particulate density · sound flicker</span></h2>
+      <canvas id="pixelViz" width="480" height="480"></canvas>
+      <div class="pixel-readout mono" id="pixelReadout">PM2.5 — µg/m³ · — dB</div>
+      <div class="note">Pixel density tracks particulate load (PM2.5 + PM10); flicker rate tracks ambient sound. Scroll down for trends and spikes.</div>
+    </div>
+
     <div class="panel">
       <h2>Trends and Spikes<span class="hint">station to station</span></h2>
       <div class="tabs" id="metricTabs"></div>
@@ -346,7 +363,7 @@
     </div>
 
     <div class="panel">
-      <h2>Line Map<span class="hint">tap to georeference</span></h2>
+      <h2>Line Map<span class="hint">tap a stop to georeference</span></h2>
       <div class="line-map-wrap" id="lineMapWrap">
         <svg id="lineMapSvg" viewBox="0 0 340 960" xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
@@ -354,6 +371,7 @@
         <span><span class="dot-sample"></span>stop</span>
         <span><span class="dot-sample nearest-sample"></span>nearest (GPS)</span>
         <span><span class="dot-sample selected-sample"></span>selected</span>
+        <span><span class="dot-sample tagged-sample"></span>tagged</span>
       </div>
       <div class="geo-meta" id="mapSelectedLabel">No stop selected — tap one below, or rely on GPS.</div>
     </div>
@@ -637,7 +655,7 @@ function addMeshRow(event, time, source, note) {
    ================================================================ */
 const canvas = document.getElementById('mainChart');
 const ctx = canvas.getContext('2d');
-const PALETTE = { ink: '#15140F', inkDim: '#75736A', line: '#DEDCD4', accent: '#FF4B22', peer: '#A8A69C' };
+const PALETTE = { ink: '#15140F', inkDim: '#75736A', line: '#DEDCD4', accent: '#FFED00', peer: '#A8A69C' };
 
 function rollingAvg(arr, window) {
   return arr.map((_, i) => {
@@ -693,10 +711,10 @@ function drawChart() {
   ctx.lineTo(xAt(data.length - 1), h - padB);
   ctx.lineTo(xAt(0), h - padB);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(255,75,34,0.10)';
+  ctx.fillStyle = 'rgba(255,237,0,0.20)';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,75,34,0.55)';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(210,220,0,0.95)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(xAt(0), yAt(longAvg[0]));
   longAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
@@ -722,6 +740,67 @@ function drawChart() {
     ctx.stroke();
   }
 }
+
+/* ================================================================
+   Signal Field — homepage pixel/noise visualisation. Grid density
+   reads particulate load (PM2.5 + PM10); flicker rate reads sound.
+   Runs on its own animation loop so it stays alive between the 3s
+   sample ticks, rather than only updating when new data lands.
+   ================================================================ */
+const pixelCanvas = document.getElementById('pixelViz');
+const pixelCtx = pixelCanvas.getContext('2d');
+const pixelReadout = document.getElementById('pixelReadout');
+const PIXEL_COLS = 120, PIXEL_ROWS = 120;
+const pixelGrid = new Float32Array(PIXEL_COLS * PIXEL_ROWS);
+
+function pixelReadLatest() {
+  const last = id => { const arr = seriesData[id]; return arr.length ? arr[arr.length - 1].value : baselineFor(id); };
+  const pm25 = last('pm25'), pm10 = last('pm10'), sound = last('sound');
+  return {
+    pm25, sound,
+    density: Math.min(1, Math.max(0.04, (pm25 + pm10 * 0.5) / 70)),
+    chaos: Math.min(1, Math.max(0.05, (sound - 40) / 60)),
+  };
+}
+
+function stepPixelField() {
+  const { density, chaos } = pixelReadLatest();
+  const flickerCount = Math.round(pixelGrid.length * (0.03 + chaos * 0.32));
+  for (let i = 0; i < flickerCount; i++) {
+    const idx = Math.floor(Math.random() * pixelGrid.length);
+    pixelGrid[idx] = Math.random() < density ? 0.55 + Math.random() * 0.45 : Math.random() * 0.3;
+  }
+  for (let i = 0; i < pixelGrid.length; i++) pixelGrid[i] *= 0.985; // gentle decay, keeps it from saturating solid
+}
+
+function drawPixelField() {
+  const w = pixelCanvas.width, h = pixelCanvas.height;
+  const cw = w / PIXEL_COLS, ch = h / PIXEL_ROWS;
+  pixelCtx.clearRect(0, 0, w, h);
+  for (let r = 0; r < PIXEL_ROWS; r++) {
+    for (let c = 0; c < PIXEL_COLS; c++) {
+      const v = pixelGrid[r * PIXEL_COLS + c];
+      if (v < 0.06) continue;
+      pixelCtx.fillStyle = v > 0.72
+        ? 'rgba(255,237,0,' + Math.min(1, v).toFixed(2) + ')'   // accent — dense/loud cells
+        : 'rgba(21,20,15,' + Math.min(0.8, v).toFixed(2) + ')'; // ink — everything else
+      pixelCtx.fillRect(Math.floor(c * cw), Math.floor(r * ch), Math.ceil(cw), Math.ceil(ch));
+    }
+  }
+}
+
+let pixelLastFrame = 0;
+function pixelLoop(ts) {
+  if (!pixelLastFrame || ts - pixelLastFrame > 90) { // ~11fps — reads as static/grain, not smooth animation
+    pixelLastFrame = ts;
+    stepPixelField();
+    drawPixelField();
+    const { pm25, sound } = pixelReadLatest();
+    pixelReadout.textContent = 'PM2.5 ' + pm25.toFixed(1) + ' µg/m³ · ' + sound.toFixed(1) + ' dB';
+  }
+  requestAnimationFrame(pixelLoop);
+}
+requestAnimationFrame(pixelLoop);
 
 /* ================================================================
    Field toolkit — geolocation, check-in, tag stop, export
@@ -780,6 +859,10 @@ function selectStation(id) {
 function markNearestOnMap(id) {
   lineMapSvg.querySelectorAll('.stop-dot').forEach(el => el.classList.toggle('nearest', el.dataset.id === id));
 }
+function markStationTagged(id) {
+  const dot = lineMapSvg.querySelector('.stop-dot[data-id="' + id + '"]');
+  if (dot) dot.classList.add('tagged');
+}
 
 buildLineMap();
 
@@ -836,6 +919,7 @@ function addFieldEntry(type) {
   fieldLog.unshift(entry);
   noteInput.value = '';
   if (selectedStationId) selectStation(selectedStationId); // clears selection + map highlight
+  if (station) markStationTagged(station.id); // successful tag — node turns yellow
   renderFieldLog();
   if (navigator.vibrate) navigator.vibrate(type === 'Check-in' ? 40 : [20, 40, 20]);
 }
