@@ -138,7 +138,7 @@
   .legend .swatch { display: inline-block; width: 12px; height: 3px; margin-right: 4px; vertical-align: middle; }
 
   canvas { width: 100%; display: block; }
-  #pixelViz { border-radius: 2px; background: var(--bg); max-width: 460px; margin: 0 auto; aspect-ratio: 1 / 1; }
+  #pixelViz { border-radius: 50%; background: var(--bg); max-width: 460px; margin: 0 auto; aspect-ratio: 1 / 1; }
   .pixel-readout {
     font-family: var(--font-main);
     font-size: 11px;
@@ -154,6 +154,10 @@
   td:first-child, th:first-child { position: sticky; left: 0; background: var(--panel); z-index: 1; }
   td.self { color: var(--ink); font-weight: 600; }
   td.peer { color: var(--peer); }
+  td.field { color: var(--ink); font-weight: 600; }
+  .data-table tr.field-row td { background: var(--accent-dim); }
+  .data-table tr.field-row td:first-child { background: var(--accent-dim); }
+  .data-table td.log-note { white-space: normal; min-width: 140px; }
   .table-scroll { max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: 2px; }
 
   #archiveToggle {
@@ -289,10 +293,10 @@
 
   <div id="monitorView" class="view active">
     <div class="panel">
-      <h2>Signal Field<span class="hint">particulate density · sound flicker</span></h2>
+      <h2>Signal Field<span class="hint" id="pixelHint">reading: sound</span></h2>
       <canvas id="pixelViz" width="480" height="480"></canvas>
-      <div class="pixel-readout mono" id="pixelReadout">PM2.5 — µg/m³ · — dB</div>
-      <div class="note">Pixel density tracks particulate load (PM2.5 + PM10); flicker rate tracks ambient sound. Scroll down for trends and spikes.</div>
+      <div class="pixel-readout mono" id="pixelReadout">— — · — —</div>
+      <div class="note"></div>
     </div>
 
     <div class="panel">
@@ -314,11 +318,12 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>Time</th><th>Src</th>
+              <th>Time</th><th>Type</th><th>Src</th>
               <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
               <th>CO2</th><th>dB</th>
               <th>MagX</th><th>MagY</th><th>MagZ</th>
               <th>Pres.</th><th>Hum.</th><th>Gas</th>
+              <th>Location / Note</th>
             </tr>
           </thead>
           <tbody id="logBody"></tbody>
@@ -330,17 +335,19 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>Time</th><th>Src</th>
+                <th>Time</th><th>Type</th><th>Src</th>
                 <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
                 <th>CO2</th><th>dB</th>
                 <th>MagX</th><th>MagY</th><th>MagZ</th>
                 <th>Pres.</th><th>Hum.</th><th>Gas</th>
+                <th>Location / Note</th>
               </tr>
             </thead>
             <tbody id="archiveBody"></tbody>
           </table>
         </div>
       </div>
+      <button id="exportDatalogBtn" class="btn btn-ghost btn-block" style="margin-top:10px;">Export session CSV</button>
     </div>
 
     <div class="panel">
@@ -491,6 +498,8 @@ const METRICS = [
   { id: 'magY', label: 'Mag Y' }, { id: 'magZ', label: 'Mag Z' }, { id: 'pressure', label: 'Pressure' },
   { id: 'humidity', label: 'Humidity' }, { id: 'gas', label: 'Gas Res.' },
 ];
+const METRIC_BY_ID = {};
+METRICS.forEach(m => METRIC_BY_ID[m.id] = m);
 // Magnetometer axes and gas resistance stay out of the centre chart (too
 // noisy to read as a trend) but still get generated and logged for the
 // datalog table below.
@@ -611,31 +620,59 @@ const logBody = document.getElementById('logBody');
 const archiveBody = document.getElementById('archiveBody');
 const MAX_LIVE_ROWS = 12;
 let liveRows = [];
+// Full session history in insertion order, kept separately from liveRows
+// (which only holds the 12 rows currently on screen) and the archive pane
+// (which only holds rendered HTML) — this is what "Export session CSV"
+// downloads from, so nothing is lost once a row scrolls into the archive.
+let allLogRows = [];
 
 function addLogRow(row) {
+  allLogRows.push(row);
   liveRows.unshift(row);
   if (liveRows.length > MAX_LIVE_ROWS) {
     const overflow = liveRows.pop();
     const tr = document.createElement('tr');
+    if (isFieldRow(overflow)) tr.classList.add('field-row');
     tr.innerHTML = rowHTML(overflow);
     archiveBody.prepend(tr);
   }
   renderLog();
 }
+// Field check-ins/tags are logged through this same function (see
+// addFieldEntry below) rather than a separate table, so they show up
+// on the homepage Datalog alongside sensor readings, not just in the
+// Field view's own list or the Mesh panel.
+function isFieldRow(row) { return row.type && row.type !== 'Reading'; }
 function rowHTML(row) {
-  return `<td>${row.time}</td><td class="${row.source}">${row.source}</td>` +
+  return `<td>${row.time}</td><td>${row.type || 'Reading'}</td><td class="${row.source}">${row.source}</td>` +
          `<td>${row.pm1}</td><td>${row.pm25}</td><td>${row.pm10}</td>` +
          `<td>${row.co2}</td><td>${row.db}</td>` +
          `<td>${row.magX}</td><td>${row.magY}</td><td>${row.magZ}</td>` +
-         `<td>${row.pressure}</td><td>${row.humidity}</td><td>${row.gas}</td>`;
+         `<td>${row.pressure}</td><td>${row.humidity}</td><td>${row.gas}</td>` +
+         `<td class="log-note">${row.loc || '—'}</td>`;
 }
-function renderLog() { logBody.innerHTML = liveRows.map(r => `<tr>${rowHTML(r)}</tr>`).join(''); }
+function renderLog() { logBody.innerHTML = liveRows.map(r => `<tr class="${isFieldRow(r) ? 'field-row' : ''}">${rowHTML(r)}</tr>`).join(''); }
 
 document.getElementById('archiveToggle').addEventListener('click', function () {
   const pane = document.getElementById('archivePane');
   const showing = pane.style.display === 'block';
   pane.style.display = showing ? 'none' : 'block';
   this.textContent = showing ? 'Show archive' : 'Hide archive';
+});
+
+document.getElementById('exportDatalogBtn').addEventListener('click', () => {
+  if (!allLogRows.length) return;
+  const header = 'time,type,source,pm1_0,pm2_5,pm10,co2,sound_db,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note\n';
+  const rows = allLogRows.map(r => [
+    r.time, r.type || 'Reading', r.source,
+    r.pm1, r.pm25, r.pm10, r.co2, r.db, r.magX, r.magY, r.magZ, r.pressure, r.humidity, r.gas,
+    '"' + String(r.loc || '').replace(/"/g, '""') + '"'
+  ].join(',')).join('\n');
+  const blob = new Blob([header + rows], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'undersensed-datalog.csv'; a.click();
+  URL.revokeObjectURL(url);
 });
 
 /* ================================================================
@@ -750,19 +787,46 @@ function drawChart() {
 const pixelCanvas = document.getElementById('pixelViz');
 const pixelCtx = pixelCanvas.getContext('2d');
 const pixelReadout = document.getElementById('pixelReadout');
+const pixelHint = document.getElementById('pixelHint');
 const PIXEL_COLS = 120, PIXEL_ROWS = 120;
 const pixelGrid = new Float32Array(PIXEL_COLS * PIXEL_ROWS);
 
+// Typical min/max range the circle expects to see per metric, used to
+// normalize whichever one is currently selected in Trends and Spikes into
+// a 0–1 density. Loose real-world bands, not sensor spec limits.
+const VIZ_RANGE = {
+  sound:    { min: 30,  max: 100 },
+  pm1:      { min: 0,   max: 40  },
+  pm25:     { min: 0,   max: 70  },
+  pm10:     { min: 0,   max: 100 },
+  co2:      { min: 400, max: 1500 },
+  pressure: { min: 990, max: 1030 },
+  humidity: { min: 20,  max: 90  },
+};
+const UNIT_FOR = { sound: 'dB', pm1: 'µg/m³', pm25: 'µg/m³', pm10: 'µg/m³', co2: 'ppm', pressure: 'hPa', humidity: '%' };
+const DECIMALS_FOR = { sound: 1, pm1: 1, pm25: 1, pm10: 1, co2: 0, pressure: 1, humidity: 1 };
+
 function pixelReadLatest() {
   const last = id => { const arr = seriesData[id]; return arr.length ? arr[arr.length - 1].value : baselineFor(id); };
-  const pm25 = last('pm25'), pm10 = last('pm10'), sound = last('sound');
-  return {
-    pm25, sound,
-    density: Math.min(1, Math.max(0.04, (pm25 + pm10 * 0.5) / 70)),
-    // Raised floor (baseline sound ~55dB) — quiet, steady conditions stay
-    // near-still; only real spikes above baseline push chaos up.
-    chaos: Math.min(1, Math.max(0.015, (sound - 58) / 55)),
-  };
+  const metric = activeMetric; // whichever tab is selected in Trends and Spikes
+  const value = last(metric);
+  const range = VIZ_RANGE[metric] || VIZ_RANGE.pm25;
+
+  // Density: where the current reading sits in that metric's typical range.
+  const density = Math.min(1, Math.max(0.04, (value - range.min) / (range.max - range.min)));
+
+  // Chaos (flicker rate): how far recent samples have strayed from their
+  // own short rolling average, scaled against a "typical wobble" band for
+  // this metric — so a real spike (the kind the Trends and Spikes chart
+  // flags) reads as a burst of flicker, and calm/steady readings stay
+  // near-still, whichever metric is active.
+  const recent = seriesData[metric].slice(-15).map(p => p.value);
+  const avg = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : value;
+  const wobbleBand = (range.max - range.min) * 0.12;
+  const deviation = recent.length ? Math.max(...recent.map(v => Math.abs(v - avg))) : 0;
+  const chaos = Math.min(1, Math.max(0.015, deviation / wobbleBand));
+
+  return { metric, value, density, chaos };
 }
 
 function stepPixelField() {
@@ -797,8 +861,10 @@ function pixelLoop(ts) {
     pixelLastFrame = ts;
     stepPixelField();
     drawPixelField();
-    const { pm25, sound } = pixelReadLatest();
-    pixelReadout.textContent = 'PM2.5 ' + pm25.toFixed(1) + ' µg/m³ · ' + sound.toFixed(1) + ' dB';
+    const { metric, value } = pixelReadLatest();
+    const label = METRIC_BY_ID[metric] ? METRIC_BY_ID[metric].label : metric;
+    pixelReadout.textContent = label + ' ' + value.toFixed(DECIMALS_FOR[metric] ?? 1) + ' ' + (UNIT_FOR[metric] || '');
+    pixelHint.textContent = 'reading: ' + label.toLowerCase();
   }
   requestAnimationFrame(pixelLoop);
 }
@@ -924,6 +990,17 @@ function addFieldEntry(type) {
   if (station) markStationTagged(station.id); // successful tag — node turns yellow
   renderFieldLog();
   if (navigator.vibrate) navigator.vibrate(type === 'Check-in' ? 40 : [20, 40, 20]);
+
+  // Also feed this into the homepage Datalog (not just the Field view's own
+  // list, and not the Mesh panel — that's for node-to-node relay events).
+  // Sensor columns have nothing to show for a check-in/tag, so they're
+  // dashed out; the station + note ride in the Location/Note column instead.
+  addLogRow({
+    time: entry.time, type: entry.type, source: 'field',
+    pm1: '—', pm25: '—', pm10: '—', co2: '—', db: '—',
+    magX: '—', magY: '—', magZ: '—', pressure: '—', humidity: '—', gas: '—',
+    loc: station ? (station.name + (entry.note ? ' · ' + entry.note : '')) : (entry.note || '—')
+  });
 }
 
 function renderFieldLog() {
