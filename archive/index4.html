@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#F1F0EC">
+<title>Underground Sensing — Field Console</title>
+<style>
+  :root {
+    --bg: #F1F0EC;
+    --panel: #FFFFFF;
+    --line: #DEDCD4;
+    --ink: #15140F;
+    --ink-dim: #75736A;
+    --accent: #FFED00;
+    --accent-dim: #FFF9B3;
+    --peer: #A8A69C;
+    --error: #B23A2A;
+    --font-main: Arial, Helvetica, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-main);
+    padding: 16px;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: var(--font-main); }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+  }
+  .brand-name {
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.02em;
+  }
+  .brand-status {
+    font-family: var(--font-main);
+    font-size: 11px;
+    color: var(--ink-dim);
+    margin-top: 5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; background: var(--ink-dim); flex-shrink: 0; }
+  .dot.self { background: var(--ink); }
+  .dot.accent { background: var(--accent); }
+
+  .btn {
+    font-family: var(--font-main);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    border-radius: 2px;
+    padding: 10px 14px;
+    cursor: pointer;
+    min-height: 40px;
+    border: 1px solid var(--ink);
+    background: var(--panel);
+    color: var(--ink);
+    -webkit-appearance: none;
+  }
+  .btn-sm { padding: 8px 12px; font-size: 11px; min-height: 34px; }
+  .btn-outline { background: transparent; }
+  .btn-accent { background: var(--accent); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+  .btn-ghost { border: 1px dashed var(--line); color: var(--ink-dim); background: none; }
+  .btn:active { transform: translateY(1px); }
+  .btn-block { width: 100%; }
+
+  .viewTabs { display: flex; gap: 6px; margin-bottom: 16px; }
+  .viewTab {
+    flex: 1;
+    font-family: var(--font-main);
+    font-size: 12px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink-dim);
+    border-radius: 2px;
+    cursor: pointer;
+    min-height: 40px;
+  }
+  .viewTab.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    margin: 0 0 12px 0;
+    font-weight: 600;
+    font-family: var(--font-main);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .panel h2 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 10.5px; }
+
+  .tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex-shrink: 0;
+    font-family: var(--font-main);
+    font-size: 11px;
+    padding: 7px 11px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--bg);
+    color: var(--ink-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tab.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  .legend { font-family: var(--font-main); font-size: 10.5px; color: var(--ink-dim); display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+  .legend .swatch { display: inline-block; width: 12px; height: 3px; margin-right: 4px; vertical-align: middle; }
+
+  canvas { width: 100%; display: block; }
+  #pixelViz { border-radius: 50%; background: var(--bg); max-width: 460px; margin: 0 auto; aspect-ratio: 1 / 1; }
+  .pixel-readout {
+    font-family: var(--font-main);
+    font-size: 11px;
+    color: var(--ink-dim);
+    letter-spacing: 0.02em;
+    margin-top: 8px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-family: var(--font-main); font-size: 12px; }
+  .data-table { font-family: var(--font-mono); font-size: 11px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--ink-dim); font-weight: 500; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.04em; position: sticky; top: 0; background: var(--panel); }
+  td:first-child, th:first-child { position: sticky; left: 0; background: var(--panel); z-index: 1; }
+  td.self { color: var(--ink); font-weight: 600; }
+  td.peer { color: var(--peer); }
+  td.field { color: var(--ink); font-weight: 600; }
+  .data-table tr.field-row td { background: var(--accent-dim); }
+  .data-table tr.field-row td:first-child { background: var(--accent-dim); }
+  .data-table td.log-note { white-space: normal; min-width: 140px; }
+  .table-scroll { max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: 2px; }
+
+  #archiveToggle {
+    font-family: var(--font-main);
+    font-size: 11px;
+    color: var(--ink-dim);
+    background: none;
+    border: 1px dashed var(--line);
+    border-radius: 2px;
+    padding: 10px;
+    width: 100%;
+    text-align: center;
+    cursor: pointer;
+    margin-top: 10px;
+    min-height: 40px;
+  }
+  #archiveToggle:active { color: var(--ink); }
+  #archivePane { display: none; margin-top: 10px; }
+
+  .note { font-family: var(--font-main); font-size: 10px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; }
+
+  /* Field toolkit */
+  .geo-coords { font-family: var(--font-main); font-size: 22px; font-weight: 600; letter-spacing: 0.01em; }
+  .geo-meta { font-family: var(--font-main); font-size: 11.5px; color: var(--ink-dim); margin-top: 6px; display: flex; align-items: center; gap: 6px; min-height: 16px; }
+  .geo-enable { margin-top: 12px; }
+
+  input#noteInput {
+    width: 100%;
+    font-family: var(--font-main);
+    font-size: 16px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  input#noteInput:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .field-actions {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: 8px;
+    padding: 12px 0 4px 0;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--bg) 55%, transparent);
+  }
+  .field-actions .btn { flex: 1; font-size: 13px; min-height: 52px; }
+
+  .line-map-wrap {
+    max-height: 520px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--bg);
+    padding: 10px 0;
+  }
+  .line-map-wrap svg { display: block; margin: 0 auto; }
+  .stop-line { stroke: var(--ink); stroke-width: 3; fill: none; }
+  .stop-dot {
+    fill: var(--panel);
+    stroke: var(--ink);
+    stroke-width: 2.5;
+    cursor: pointer;
+  }
+  .stop-dot:active { fill: var(--accent-dim); }
+  .stop-dot.nearest { stroke: var(--ink); stroke-width: 3.5; }
+  .stop-dot.selected { fill: var(--ink); stroke: var(--ink); }
+  .stop-dot.tagged { fill: var(--accent); stroke: var(--accent); stroke-width: 2.5; }
+  .stop-label {
+    font-family: var(--font-main);
+    font-size: 8.5px;
+    fill: var(--ink-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .stop-label.terminus { font-weight: 700; fill: var(--ink); }
+  .stop-label.selected { fill: var(--ink); font-weight: 700; }
+  .map-legend {
+    font-family: var(--font-main);
+    font-size: 10.5px;
+    color: var(--ink-dim);
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .map-legend .dot-sample { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; border: 2px solid var(--ink); background: var(--panel); }
+  .map-legend .dot-sample.nearest-sample { border-color: var(--ink); border-width: 3px; }
+  .map-legend .dot-sample.selected-sample { background: var(--ink); border-color: var(--ink); }
+  .map-legend .dot-sample.tagged-sample { background: var(--accent); border-color: var(--accent); }
+
+  .field-entry { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .field-entry:last-child { border-bottom: none; }
+  .field-entry-main { display: flex; justify-content: space-between; font-family: var(--font-main); font-size: 12px; }
+  .field-entry-type { font-weight: 600; }
+  .field-entry-type.accent { background: var(--accent); color: var(--ink); padding: 1px 6px; border-radius: 2px; }
+  .field-entry-time { color: var(--ink-dim); }
+  .field-entry-meta { font-family: var(--font-main); font-size: 11px; color: var(--ink-dim); margin-top: 3px; }
+  .field-entry-note { font-size: 12.5px; margin-top: 3px; font-style: italic; }
+  .field-entry-del { float: right; background: none; border: none; color: var(--ink-dim); font-family: var(--font-main); font-size: 12px; cursor: pointer; padding: 2px 4px; }
+  .empty-state { font-family: var(--font-main); font-size: 11.5px; color: var(--ink-dim); text-align: center; padding: 16px 0; }
+
+  @media (max-width: 899px) {
+    .view { display: none; }
+    .view.active { display: block; }
+  }
+  @media (min-width: 900px) {
+    .viewTabs { display: none; }
+    .views { display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px; align-items: start; }
+    .view { display: block !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <div class="brand-name">UNDERGROUND SENSING</div>
+    <div class="brand-status mono" id="btStatus"><span class="dot"></span>simulated data</div>
+  </div>
+  <button id="connectBtn" class="btn btn-outline btn-sm">CONNECT</button>
+</header>
+
+<div class="viewTabs">
+  <button class="viewTab active" data-view="monitorView">MONITOR</button>
+  <button class="viewTab" data-view="fieldView">FIELD</button>
+</div>
+
+<div class="views">
+
+  <div id="monitorView" class="view active">
+    <div class="panel">
+      <h2>Signal Field<span class="hint" id="pixelHint">reading: sound</span></h2>
+      <canvas id="pixelViz" width="480" height="480"></canvas>
+      <div class="pixel-readout mono" id="pixelReadout">— — · — —</div>
+      <div class="note"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Trends and Spikes<span class="hint">station to station</span></h2>
+      <div class="tabs" id="metricTabs"></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--ink)"></span>self</span>
+        <span><span class="swatch" style="background:var(--peer)"></span>peer</span>
+        <span><span class="swatch" style="background:var(--ink-dim)"></span>rolling avg</span>
+        <span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>trend band</span>
+      </div>
+      <canvas id="mainChart" width="900" height="300"></canvas>
+      <div class="note">Station markers are illustrative until real dwell-detection events feed this chart.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Datalog</h2>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Time</th><th>Type</th><th>Src</th>
+              <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
+              <th>CO2</th><th>dB</th>
+              <th>MagX</th><th>MagY</th><th>MagZ</th>
+              <th>Pres.</th><th>Hum.</th><th>Gas</th>
+              <th>Location / Note</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+      <button id="archiveToggle">Show archive</button>
+      <div id="archivePane">
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Time</th><th>Type</th><th>Src</th>
+                <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
+                <th>CO2</th><th>dB</th>
+                <th>MagX</th><th>MagY</th><th>MagZ</th>
+                <th>Pres.</th><th>Hum.</th><th>Gas</th>
+                <th>Location / Note</th>
+              </tr>
+            </thead>
+            <tbody id="archiveBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <button id="exportDatalogBtn" class="btn btn-ghost btn-block" style="margin-top:10px;">Export session CSV</button>
+    </div>
+
+    <div class="panel">
+      <h2>Mesh</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Event</th><th>Time</th><th>Src</th><th>Note</th></tr></thead>
+          <tbody id="meshBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="fieldView" class="view">
+    <div class="panel">
+      <h2>Location</h2>
+      <div class="geo-coords mono" id="geoCoords">—, —</div>
+      <div class="geo-meta" id="geoMeta">Location not enabled</div>
+      <button id="geoEnableBtn" class="btn btn-outline geo-enable">Enable location</button>
+    </div>
+
+    <div class="panel">
+      <h2>Line Map<span class="hint">tap a stop to georeference</span></h2>
+      <div class="line-map-wrap" id="lineMapWrap">
+        <svg id="lineMapSvg" viewBox="0 0 340 960" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="map-legend">
+        <span><span class="dot-sample"></span>stop</span>
+        <span><span class="dot-sample nearest-sample"></span>nearest (GPS)</span>
+        <span><span class="dot-sample selected-sample"></span>selected</span>
+        <span><span class="dot-sample tagged-sample"></span>tagged</span>
+      </div>
+      <div class="geo-meta" id="mapSelectedLabel">No stop selected — tap one below, or rely on GPS.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Note<span class="hint">optional, tags the next entry</span></h2>
+      <input id="noteInput" type="text" placeholder="e.g. loud vent, standing water…" autocomplete="off">
+    </div>
+
+    <div class="panel">
+      <h2>Field log<span class="hint" id="fieldCount">0 entries</span></h2>
+      <div id="fieldLogList"></div>
+      <div class="empty-state" id="fieldEmpty">No entries yet — check in or tag a stop below.</div>
+      <button id="exportBtn" class="btn btn-ghost btn-block" style="margin-top:10px;">Export CSV</button>
+    </div>
+
+    <div class="field-actions">
+      <button id="checkInBtn" class="btn btn-accent">CHECK IN</button>
+      <button id="tagStopBtn" class="btn btn-outline">TAG STOP</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+/* ================================================================
+   BLE data contract — placeholder UUIDs for the future GATT layout.
+   Firmware doesn't implement this yet; connecting fails gracefully
+   until it does.
+   ================================================================ */
+const UNDERSENSED_SERVICE_UUID = 'b3c9a000-1d2e-4f3a-8b6c-9e0f1a2b3c4d';
+const SENSOR_DATA_CHAR_UUID    = 'b3c9a001-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // notify: latest reading
+const MESH_EVENT_CHAR_UUID     = 'b3c9a002-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // notify: latest mesh event
+const TIME_SYNC_CHAR_UUID      = 'b3c9a003-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // write: phone epoch time
+
+const btStatus = document.getElementById('btStatus');
+document.getElementById('connectBtn').addEventListener('click', connectBluetooth);
+
+async function connectBluetooth() {
+  if (!navigator.bluetooth) {
+    btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Web Bluetooth unavailable — use Bluefy on iOS, or Chrome on Android/desktop.';
+    return;
+  }
+  try {
+    const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [UNDERSENSED_SERVICE_UUID] }] });
+    btStatus.innerHTML = '<span class="dot accent"></span>Connecting to ' + device.name + '…';
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(UNDERSENSED_SERVICE_UUID);
+
+    const sensorChar = await service.getCharacteristic(SENSOR_DATA_CHAR_UUID);
+    await sensorChar.startNotifications();
+    sensorChar.addEventListener('characteristicvaluechanged', handleSensorNotification);
+
+    const meshChar = await service.getCharacteristic(MESH_EVENT_CHAR_UUID);
+    await meshChar.startNotifications();
+    meshChar.addEventListener('characteristicvaluechanged', handleMeshNotification);
+
+    const timeSyncChar = await service.getCharacteristic(TIME_SYNC_CHAR_UUID);
+    const epochBuf = new ArrayBuffer(4);
+    new DataView(epochBuf).setUint32(0, Math.floor(Date.now() / 1000), true);
+    await timeSyncChar.writeValue(epochBuf);
+
+    btStatus.innerHTML = '<span class="dot accent"></span>Connected — ' + device.name + ' (time synced)';
+    simulating = false;
+
+    device.addEventListener('gattserverdisconnected', () => {
+      btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Disconnected';
+      simulating = true;
+    });
+  } catch (err) {
+    btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Connection failed: ' + err.message;
+  }
+}
+
+function handleSensorNotification(event) {
+  const v = event.target.value;
+  const ERROR_VALUE = -9999;
+  const readOrNull = (offset) => { const val = v.getFloat32(offset, true); return val === ERROR_VALUE ? null : val; };
+  const accelX = readOrNull(8), accelY = readOrNull(12), accelZ = readOrNull(16);
+  const magX = readOrNull(20), magY = readOrNull(24), magZ = readOrNull(28);
+  const pressure = readOrNull(32), co2 = readOrNull(36), soundDb = readOrNull(40);
+  const pm1 = readOrNull(44), pm25 = readOrNull(48), pm10 = readOrNull(52);
+  const humidity = readOrNull(56), gasResistance = readOrNull(60);
+  const source = v.getUint8(65) === 0 ? 'self' : 'peer';
+
+  tick++;
+  [['sound', soundDb], ['pm1', pm1], ['pm25', pm25], ['pm10', pm10], ['co2', co2],
+   ['magX', magX], ['magY', magY], ['magZ', magZ], ['pressure', pressure],
+   ['humidity', humidity], ['gas', gasResistance]].forEach(([id, val]) => {
+    if (val !== null) pushMetricSample(id, { t: tick, value: val, source });
+  });
+  drawChart();
+
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  addLogRow({
+    time: timeStr, source, pm1: fmt(pm1, 1), pm25: fmt(pm25, 1), pm10: fmt(pm10, 1),
+    co2: fmt(co2, 0), db: fmt(soundDb, 1), magX: fmt(magX, 2), magY: fmt(magY, 2), magZ: fmt(magZ, 2),
+    pressure: fmt(pressure, 1), humidity: fmt(humidity, 1), gas: fmt(gasResistance, 0)
+  });
+}
+function fmt(val, decimals) { return val !== null && val !== undefined ? val.toFixed(decimals) : 'error'; }
+
+function handleMeshNotification(event) {
+  const text = new TextDecoder().decode(event.target.value);
+  const [eventType, detail] = text.split(',');
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  addMeshRow(eventType, timeStr, eventType === 'Sent' ? 'self' : 'peer', detail || '—');
+}
+
+/* ================================================================
+   Metrics + simulated data (stands in until real hardware notifies)
+   ================================================================ */
+const METRICS = [
+  { id: 'sound', label: 'Sound' }, { id: 'pm1', label: 'PM1.0' }, { id: 'pm25', label: 'PM2.5' },
+  { id: 'pm10', label: 'PM10' }, { id: 'co2', label: 'CO2' }, { id: 'magX', label: 'Mag X' },
+  { id: 'magY', label: 'Mag Y' }, { id: 'magZ', label: 'Mag Z' }, { id: 'pressure', label: 'Pressure' },
+  { id: 'humidity', label: 'Humidity' }, { id: 'gas', label: 'Gas Res.' },
+];
+const METRIC_BY_ID = {};
+METRICS.forEach(m => METRIC_BY_ID[m.id] = m);
+// Magnetometer axes and gas resistance stay out of the centre chart (too
+// noisy to read as a trend) but still get generated and logged for the
+// datalog table below.
+const CHART_METRICS = METRICS.filter(m => !['magX', 'magY', 'magZ', 'gas'].includes(m.id));
+let activeMetric = CHART_METRICS[0].id;
+const seriesData = {};
+METRICS.forEach(m => seriesData[m.id] = []);
+
+// Real Central line stations (West Ruislip/Ealing Broadway – Epping, incl.
+// Hainault Loop) — used for field geolocation AND for the Line Map SVG
+// below. x/y are layout coordinates for the vertical diagram, not geographic.
+const STATIONS = [
+  // West Ruislip branch — main trunk
+  { id: 'west_ruislip',       name: 'West Ruislip',      lat: 51.569587, lon: -0.437860, branch: 'main', x: 200, y: 40 },
+  { id: 'ruislip_gardens',    name: 'Ruislip Gardens',    lat: 51.559960, lon: -0.409294, branch: 'main', x: 200, y: 64 },
+  { id: 'south_ruislip',      name: 'South Ruislip',      lat: 51.556890, lon: -0.399116, branch: 'main', x: 200, y: 88 },
+  { id: 'northolt',           name: 'Northolt',           lat: 51.548212, lon: -0.368441, branch: 'main', x: 200, y: 112 },
+  { id: 'greenford',          name: 'Greenford',          lat: 51.541980, lon: -0.345879, branch: 'main', x: 200, y: 136 },
+  { id: 'perivale',           name: 'Perivale',           lat: 51.536341, lon: -0.323070, branch: 'main', x: 200, y: 160 },
+  { id: 'hanger_lane',        name: 'Hanger Lane',        lat: 51.530072, lon: -0.292996, branch: 'main', x: 200, y: 184 },
+  { id: 'north_acton',        name: 'North Acton',        lat: 51.523432, lon: -0.259730, branch: 'main', x: 200, y: 208 },
+  { id: 'east_acton',         name: 'East Acton',         lat: 51.516263, lon: -0.248112, branch: 'main', x: 200, y: 232 },
+  { id: 'white_city',         name: 'White City',         lat: 51.512232, lon: -0.224632, branch: 'main', x: 200, y: 256 },
+  { id: 'shepherds_bush',     name: "Shepherd's Bush",    lat: 51.504532, lon: -0.218519, branch: 'main', x: 200, y: 280 },
+  { id: 'holland_park',       name: 'Holland Park',       lat: 51.507146, lon: -0.206558, branch: 'main', x: 200, y: 304 },
+  { id: 'notting_hill_gate',  name: 'Notting Hill Gate',  lat: 51.509375, lon: -0.195922, branch: 'main', x: 200, y: 328 },
+  { id: 'queensway',          name: 'Queensway',          lat: 51.510449, lon: -0.187420, branch: 'main', x: 200, y: 352 },
+  { id: 'lancaster_gate',     name: 'Lancaster Gate',     lat: 51.511891, lon: -0.175430, branch: 'main', x: 200, y: 376 },
+  { id: 'marble_arch',        name: 'Marble Arch',        lat: 51.513965, lon: -0.158571, branch: 'main', x: 200, y: 400 },
+  { id: 'bond_street',        name: 'Bond Street',        lat: 51.513797, lon: -0.149614, branch: 'main', x: 200, y: 424 },
+  { id: 'oxford_circus',      name: 'Oxford Circus',      lat: 51.515223, lon: -0.140836, branch: 'main', x: 200, y: 448 },
+  { id: 'tottenham_court_road', name: 'Tottenham Court Road', lat: 51.516211, lon: -0.131110, branch: 'main', x: 200, y: 472 },
+  { id: 'holborn',            name: 'Holborn',            lat: 51.517236, lon: -0.119841, branch: 'main', x: 200, y: 496 },
+  { id: 'chancery_lane',      name: 'Chancery Lane',      lat: 51.518494, lon: -0.111962, branch: 'main', x: 200, y: 520 },
+  { id: 'st_pauls',           name: "St. Paul's",         lat: 51.514835, lon: -0.097571, branch: 'main', x: 200, y: 544 },
+  { id: 'bank',               name: 'Bank',                lat: 51.513347, lon: -0.089000, branch: 'main', x: 200, y: 568 },
+  { id: 'liverpool_street',   name: 'Liverpool Street',   lat: 51.517598, lon: -0.082250, branch: 'main', x: 200, y: 592 },
+  { id: 'bethnal_green',      name: 'Bethnal Green',      lat: 51.527192, lon: -0.055392, branch: 'main', x: 200, y: 616 },
+  { id: 'mile_end',           name: 'Mile End',           lat: 51.525311, lon: -0.032666, branch: 'main', x: 200, y: 640 },
+  { id: 'stratford',          name: 'Stratford',          lat: 51.541693, lon: -0.003752, branch: 'main', x: 200, y: 664 },
+  { id: 'leyton',             name: 'Leyton',              lat: 51.558132, lon: -0.006465, branch: 'main', x: 200, y: 688 },
+  { id: 'leytonstone',        name: 'Leytonstone',        lat: 51.568522, lon: 0.009140,  branch: 'main', x: 200, y: 712 },
+  { id: 'snaresbrook',        name: 'Snaresbrook',        lat: 51.580891, lon: 0.021464,  branch: 'main', x: 200, y: 736 },
+  { id: 'south_woodford',     name: 'South Woodford',     lat: 51.591553, lon: 0.027943,  branch: 'main', x: 200, y: 760 },
+  { id: 'woodford',           name: 'Woodford',           lat: 51.607202, lon: 0.034056,  branch: 'main', x: 200, y: 784 },
+  { id: 'buckhurst_hill',     name: 'Buckhurst Hill',     lat: 51.626577, lon: 0.046713,  branch: 'main', x: 200, y: 808 },
+  { id: 'loughton',           name: 'Loughton',            lat: 51.641571, lon: 0.055279,  branch: 'main', x: 200, y: 832 },
+  { id: 'debden',             name: 'Debden',              lat: 51.645492, lon: 0.083801,  branch: 'main', x: 200, y: 856 },
+  { id: 'theydon_bois',       name: 'Theydon Bois',       lat: 51.672552, lon: 0.102891,  branch: 'main', x: 200, y: 880 },
+  { id: 'epping',             name: 'Epping',              lat: 51.693686, lon: 0.113826,  branch: 'main', x: 200, y: 904 },
+  // Ealing Broadway branch — joins the trunk at North Acton
+  { id: 'ealing_broadway',    name: 'Ealing Broadway',    lat: 51.514861, lon: -0.302010, branch: 'ealing', x: 90, y: 184 },
+  { id: 'west_acton',         name: 'West Acton',         lat: 51.517770, lon: -0.280657, branch: 'ealing', x: 90, y: 208 },
+  // Hainault Loop — splits from Leytonstone, rejoins at Woodford
+  { id: 'wanstead',           name: 'Wanstead',            lat: 51.574902, lon: 0.028760,  branch: 'hainault', x: 110, y: 712 },
+  { id: 'redbridge',          name: 'Redbridge',           lat: 51.576367, lon: 0.045394,  branch: 'hainault', x: 110, y: 736 },
+  { id: 'gants_hill',         name: 'Gants Hill',          lat: 51.576553, lon: 0.066084,  branch: 'hainault', x: 110, y: 760 },
+  { id: 'newbury_park',       name: 'Newbury Park',        lat: 51.575639, lon: 0.090303,  branch: 'hainault', x: 110, y: 784 },
+  { id: 'barkingside',        name: 'Barkingside',         lat: 51.585851, lon: 0.088477,  branch: 'hainault', x: 110, y: 808 },
+  { id: 'fairlop',            name: 'Fairlop',             lat: 51.596110, lon: 0.090593,  branch: 'hainault', x: 110, y: 832 },
+  { id: 'hainault',           name: 'Hainault',            lat: 51.602845, lon: 0.094109,  branch: 'hainault', x: 110, y: 856 },
+  { id: 'grange_hill',        name: 'Grange Hill',         lat: 51.613481, lon: 0.092273,  branch: 'hainault', x: 110, y: 880 },
+  { id: 'chigwell',           name: 'Chigwell',            lat: 51.617858, lon: 0.076179,  branch: 'hainault', x: 110, y: 904 },
+  { id: 'roding_valley',      name: 'Roding Valley',       lat: 51.616957, lon: 0.044026,  branch: 'hainault', x: 110, y: 928 },
+];
+const STATION_BY_ID = {};
+STATIONS.forEach(s => STATION_BY_ID[s.id] = s);
+
+// Line segments to draw in the Line Map SVG: sequential trunk pairs, plus
+// the two branch splits/joins (Ealing Broadway branch, Hainault Loop).
+const LINE_SEGMENTS = [];
+const MAIN_SEQ = STATIONS.filter(s => s.branch === 'main').map(s => s.id);
+for (let i = 0; i < MAIN_SEQ.length - 1; i++) LINE_SEGMENTS.push([MAIN_SEQ[i], MAIN_SEQ[i + 1]]);
+LINE_SEGMENTS.push(['ealing_broadway', 'west_acton'], ['west_acton', 'north_acton']);
+const HAINAULT_SEQ = STATIONS.filter(s => s.branch === 'hainault').map(s => s.id);
+LINE_SEGMENTS.push(['leytonstone', HAINAULT_SEQ[0]]);
+for (let i = 0; i < HAINAULT_SEQ.length - 1; i++) LINE_SEGMENTS.push([HAINAULT_SEQ[i], HAINAULT_SEQ[i + 1]]);
+LINE_SEGMENTS.push([HAINAULT_SEQ[HAINAULT_SEQ.length - 1], 'woodford']);
+const TERMINI = new Set(['west_ruislip', 'ealing_broadway', 'epping']);
+// Trend chart walks the main West Ruislip–Epping trunk only (branches would
+// make a single left-to-right "journey" axis nonsensical).
+const CHART_STATIONS = STATIONS.filter(s => s.branch === 'main');
+
+const tabsEl = document.getElementById('metricTabs');
+CHART_METRICS.forEach(m => {
+  const btn = document.createElement('div');
+  btn.className = 'tab' + (m.id === activeMetric ? ' active' : '');
+  btn.textContent = m.label;
+  btn.addEventListener('click', () => {
+    activeMetric = m.id;
+    document.querySelectorAll('#metricTabs .tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    drawChart();
+  });
+  tabsEl.appendChild(btn);
+});
+
+function baselineFor(id) { return { sound:55, pm1:3, pm25:12, pm10:18, co2:550, magX:20, magY:-20, magZ:55, pressure:1010, humidity:55, gas:13000 }[id]; }
+function spikeChanceFor(id) { return { sound:0.12, pm1:0.06, pm25:0.08, pm10:0.08, co2:0.06, magX:0.04, magY:0.04, magZ:0.04, pressure:0.02, humidity:0.03, gas:0.05 }[id]; }
+
+let tick = 0;
+function generateSample(id, source) {
+  const base = baselineFor(id);
+  const noise = (Math.random() - 0.5) * Math.abs(base) * 0.15;
+  const spike = Math.random() < spikeChanceFor(id) ? Math.abs(base) * (0.6 + Math.random() * 0.9) : 0;
+  return { t: tick, value: base + noise + spike, source };
+}
+function pushMetricSample(id, sample) {
+  const arr = seriesData[id];
+  arr.push(sample);
+  if (arr.length > 200) arr.shift();
+}
+
+/* ================================================================
+   Datalog table + archive
+   ================================================================ */
+const logBody = document.getElementById('logBody');
+const archiveBody = document.getElementById('archiveBody');
+const MAX_LIVE_ROWS = 12;
+let liveRows = [];
+// Full session history in insertion order, kept separately from liveRows
+// (which only holds the 12 rows currently on screen) and the archive pane
+// (which only holds rendered HTML) — this is what "Export session CSV"
+// downloads from, so nothing is lost once a row scrolls into the archive.
+let allLogRows = [];
+
+function addLogRow(row) {
+  allLogRows.push(row);
+  liveRows.unshift(row);
+  if (liveRows.length > MAX_LIVE_ROWS) {
+    const overflow = liveRows.pop();
+    const tr = document.createElement('tr');
+    if (isFieldRow(overflow)) tr.classList.add('field-row');
+    tr.innerHTML = rowHTML(overflow);
+    archiveBody.prepend(tr);
+  }
+  renderLog();
+}
+// Field check-ins/tags are logged through this same function (see
+// addFieldEntry below) rather than a separate table, so they show up
+// on the homepage Datalog alongside sensor readings, not just in the
+// Field view's own list or the Mesh panel.
+function isFieldRow(row) { return row.type && row.type !== 'Reading'; }
+function rowHTML(row) {
+  return `<td>${row.time}</td><td>${row.type || 'Reading'}</td><td class="${row.source}">${row.source}</td>` +
+         `<td>${row.pm1}</td><td>${row.pm25}</td><td>${row.pm10}</td>` +
+         `<td>${row.co2}</td><td>${row.db}</td>` +
+         `<td>${row.magX}</td><td>${row.magY}</td><td>${row.magZ}</td>` +
+         `<td>${row.pressure}</td><td>${row.humidity}</td><td>${row.gas}</td>` +
+         `<td class="log-note">${row.loc || '—'}</td>`;
+}
+function renderLog() { logBody.innerHTML = liveRows.map(r => `<tr class="${isFieldRow(r) ? 'field-row' : ''}">${rowHTML(r)}</tr>`).join(''); }
+
+document.getElementById('archiveToggle').addEventListener('click', function () {
+  const pane = document.getElementById('archivePane');
+  const showing = pane.style.display === 'block';
+  pane.style.display = showing ? 'none' : 'block';
+  this.textContent = showing ? 'Show archive' : 'Hide archive';
+});
+
+document.getElementById('exportDatalogBtn').addEventListener('click', () => {
+  if (!allLogRows.length) return;
+  const header = 'time,type,source,pm1_0,pm2_5,pm10,co2,sound_db,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note\n';
+  const rows = allLogRows.map(r => [
+    r.time, r.type || 'Reading', r.source,
+    r.pm1, r.pm25, r.pm10, r.co2, r.db, r.magX, r.magY, r.magZ, r.pressure, r.humidity, r.gas,
+    '"' + String(r.loc || '').replace(/"/g, '""') + '"'
+  ].join(',')).join('\n');
+  const blob = new Blob([header + rows], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'undersensed-datalog.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+/* ================================================================
+   Mesh table
+   ================================================================ */
+const meshBody = document.getElementById('meshBody');
+function addMeshRow(event, time, source, note) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${event}</td><td>${time}</td><td class="${source}">${source}</td><td>${note}</td>`;
+  meshBody.prepend(tr);
+  while (meshBody.children.length > 10) meshBody.removeChild(meshBody.lastChild);
+}
+
+/* ================================================================
+   Chart — plain canvas, no library. Colour is reserved for the
+   trend band; raw readings stay black/grey/monochrome.
+   ================================================================ */
+const canvas = document.getElementById('mainChart');
+const ctx = canvas.getContext('2d');
+const PALETTE = { ink: '#15140F', inkDim: '#75736A', line: '#DEDCD4', accent: '#FFED00', peer: '#A8A69C' };
+
+function rollingAvg(arr, window) {
+  return arr.map((_, i) => {
+    const start = Math.max(0, i - window + 1);
+    const slice = arr.slice(start, i + 1);
+    return slice.reduce((s, p) => s + p.value, 0) / slice.length;
+  });
+}
+
+function drawChart() {
+  const data = seriesData[activeMetric];
+  const w = canvas.width, h = canvas.height, padL = 36, padR = 12, padT = 18, padB = 32;
+  ctx.clearRect(0, 0, w, h);
+  if (data.length < 2) return;
+
+  const values = data.map(p => p.value);
+  const shortAvg = rollingAvg(data, 5);
+  const longAvg = rollingAvg(data, 25);
+  const maxV = Math.max(...values, ...longAvg) * 1.15;
+  const minV = Math.min(0, Math.min(...values) * 1.15);
+
+  const xAt = i => padL + (i / (data.length - 1)) * (w - padL - padR);
+  const yAt = v => h - padB - ((v - minV) / (maxV - minV)) * (h - padT - padB);
+
+  ctx.strokeStyle = PALETTE.line;
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + (g / 4) * (h - padT - padB);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+  }
+
+  const showLabels = w >= 520;
+  const stationEvery = Math.max(1, Math.floor(data.length / CHART_STATIONS.length));
+  ctx.font = '10px Arial, sans-serif';
+  CHART_STATIONS.forEach((s, si) => {
+    const idx = Math.min(data.length - 1, si * stationEvery);
+    const x = xAt(idx);
+    ctx.strokeStyle = PALETTE.line;
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(x, padT, 2.5, 0, Math.PI * 2); ctx.fillStyle = PALETTE.ink; ctx.fill();
+    if (showLabels) {
+      ctx.fillStyle = PALETTE.inkDim;
+      ctx.fillText(s.name, x + 4, padT + 10);
+    }
+  });
+
+  // Trend band — the one deliberate colour on the chart
+  ctx.beginPath();
+  ctx.moveTo(xAt(0), yAt(longAvg[0]));
+  longAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+  ctx.lineTo(xAt(data.length - 1), h - padB);
+  ctx.lineTo(xAt(0), h - padB);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,237,0,0.20)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(210,220,0,0.95)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(xAt(0), yAt(longAvg[0]));
+  longAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+  ctx.stroke();
+
+  // Rolling average — dashed grey
+  ctx.strokeStyle = PALETTE.inkDim;
+  ctx.setLineDash([5, 4]);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(xAt(0), yAt(shortAvg[0]));
+  shortAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Live readings — black for self, grey for peer
+  for (let i = 1; i < data.length; i++) {
+    ctx.strokeStyle = data[i].source === 'self' ? PALETTE.ink : PALETTE.peer;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xAt(i - 1), yAt(data[i - 1].value));
+    ctx.lineTo(xAt(i), yAt(data[i].value));
+    ctx.stroke();
+  }
+}
+
+/* ================================================================
+   Signal Field — homepage pixel/noise visualisation. Grid density
+   reads particulate load (PM2.5 + PM10); flicker rate reads sound.
+   Runs on its own animation loop so it stays alive between the 3s
+   sample ticks, rather than only updating when new data lands.
+   ================================================================ */
+const pixelCanvas = document.getElementById('pixelViz');
+const pixelCtx = pixelCanvas.getContext('2d');
+const pixelReadout = document.getElementById('pixelReadout');
+const pixelHint = document.getElementById('pixelHint');
+const PIXEL_COLS = 120, PIXEL_ROWS = 120;
+const pixelGrid = new Float32Array(PIXEL_COLS * PIXEL_ROWS);
+
+// Typical min/max range the circle expects to see per metric, used to
+// normalize whichever one is currently selected in Trends and Spikes into
+// a 0–1 density. Loose real-world bands, not sensor spec limits.
+const VIZ_RANGE = {
+  sound:    { min: 30,  max: 100 },
+  pm1:      { min: 0,   max: 40  },
+  pm25:     { min: 0,   max: 70  },
+  pm10:     { min: 0,   max: 100 },
+  co2:      { min: 400, max: 1500 },
+  pressure: { min: 990, max: 1030 },
+  humidity: { min: 20,  max: 90  },
+};
+const UNIT_FOR = { sound: 'dB', pm1: 'µg/m³', pm25: 'µg/m³', pm10: 'µg/m³', co2: 'ppm', pressure: 'hPa', humidity: '%' };
+const DECIMALS_FOR = { sound: 1, pm1: 1, pm25: 1, pm10: 1, co2: 0, pressure: 1, humidity: 1 };
+
+function pixelReadLatest() {
+  const last = id => { const arr = seriesData[id]; return arr.length ? arr[arr.length - 1].value : baselineFor(id); };
+  const metric = activeMetric; // whichever tab is selected in Trends and Spikes
+  const value = last(metric);
+  const range = VIZ_RANGE[metric] || VIZ_RANGE.pm25;
+
+  // Density: where the current reading sits in that metric's typical range.
+  const density = Math.min(1, Math.max(0.04, (value - range.min) / (range.max - range.min)));
+
+  // Chaos (flicker rate): how far recent samples have strayed from their
+  // own short rolling average, scaled against a "typical wobble" band for
+  // this metric — so a real spike (the kind the Trends and Spikes chart
+  // flags) reads as a burst of flicker, and calm/steady readings stay
+  // near-still, whichever metric is active.
+  const recent = seriesData[metric].slice(-15).map(p => p.value);
+  const avg = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : value;
+  const wobbleBand = (range.max - range.min) * 0.12;
+  const deviation = recent.length ? Math.max(...recent.map(v => Math.abs(v - avg))) : 0;
+  const chaos = Math.min(1, Math.max(0.015, deviation / wobbleBand));
+
+  return { metric, value, density, chaos };
+}
+
+function stepPixelField() {
+  const { density, chaos } = pixelReadLatest();
+  const flickerCount = Math.round(pixelGrid.length * (0.008 + chaos * 0.18));
+  for (let i = 0; i < flickerCount; i++) {
+    const idx = Math.floor(Math.random() * pixelGrid.length);
+    pixelGrid[idx] = Math.random() < density ? 0.55 + Math.random() * 0.45 : Math.random() * 0.3;
+  }
+  for (let i = 0; i < pixelGrid.length; i++) pixelGrid[i] *= 0.985; // gentle decay, keeps it from saturating solid
+}
+
+function drawPixelField() {
+  const w = pixelCanvas.width, h = pixelCanvas.height;
+  const cw = w / PIXEL_COLS, ch = h / PIXEL_ROWS;
+  pixelCtx.clearRect(0, 0, w, h);
+  for (let r = 0; r < PIXEL_ROWS; r++) {
+    for (let c = 0; c < PIXEL_COLS; c++) {
+      const v = pixelGrid[r * PIXEL_COLS + c];
+      if (v < 0.06) continue;
+      pixelCtx.fillStyle = v > 0.72
+        ? 'rgba(255,237,0,' + Math.min(1, v).toFixed(2) + ')'   // accent — dense/loud cells
+        : 'rgba(21,20,15,' + Math.min(0.8, v).toFixed(2) + ')'; // ink — everything else
+      pixelCtx.fillRect(Math.floor(c * cw), Math.floor(r * ch), Math.ceil(cw), Math.ceil(ch));
+    }
+  }
+}
+
+let pixelLastFrame = 0;
+function pixelLoop(ts) {
+  if (!pixelLastFrame || ts - pixelLastFrame > 140) { // ~7fps — calmer, less constant motion
+    pixelLastFrame = ts;
+    stepPixelField();
+    drawPixelField();
+    const { metric, value } = pixelReadLatest();
+    const label = METRIC_BY_ID[metric] ? METRIC_BY_ID[metric].label : metric;
+    pixelReadout.textContent = label + ' ' + value.toFixed(DECIMALS_FOR[metric] ?? 1) + ' ' + (UNIT_FOR[metric] || '');
+    pixelHint.textContent = 'reading: ' + label.toLowerCase();
+  }
+  requestAnimationFrame(pixelLoop);
+}
+requestAnimationFrame(pixelLoop);
+
+/* ================================================================
+   Field toolkit — geolocation, check-in, tag stop, export
+   ================================================================ */
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function nearestStation(lat, lon) {
+  let best = null, bestDist = Infinity;
+  STATIONS.forEach(s => {
+    const d = haversineMeters(lat, lon, s.lat, s.lon);
+    if (d < bestDist) { bestDist = d; best = s; }
+  });
+  return { station: best, distance: bestDist };
+}
+
+/* ---- Line Map — vertical SVG diagram, tap a stop to georeference ---- */
+const lineMapSvg = document.getElementById('lineMapSvg');
+const mapSelectedLabel = document.getElementById('mapSelectedLabel');
+let selectedStationId = null;
+
+function buildLineMap() {
+  const lines = LINE_SEGMENTS.map(([a, b]) => {
+    const sa = STATION_BY_ID[a], sb = STATION_BY_ID[b];
+    return `<line class="stop-line" x1="${sa.x}" y1="${sa.y}" x2="${sb.x}" y2="${sb.y}"></line>`;
+  }).join('');
+  const marks = STATIONS.map(s => {
+    const isTerm = TERMINI.has(s.id);
+    const onMain = s.branch === 'main';
+    const lx = onMain ? s.x + 10 : s.x - 10;
+    return `<circle class="stop-dot" data-id="${s.id}" cx="${s.x}" cy="${s.y}" r="${isTerm ? 5 : 4}"></circle>` +
+      `<text class="stop-label${isTerm ? ' terminus' : ''}" data-id="${s.id}" x="${lx}" y="${s.y + 3}" text-anchor="${onMain ? 'start' : 'end'}">${s.name}</text>`;
+  }).join('');
+  lineMapSvg.innerHTML = lines + marks;
+  lineMapSvg.querySelectorAll('.stop-dot, .stop-label').forEach(el => {
+    el.addEventListener('click', () => selectStation(el.dataset.id));
+  });
+}
+
+function selectStation(id) {
+  selectedStationId = (selectedStationId === id) ? null : id;
+  lineMapSvg.querySelectorAll('.stop-dot, .stop-label').forEach(el => {
+    el.classList.toggle('selected', el.dataset.id === selectedStationId);
+  });
+  if (selectedStationId) {
+    mapSelectedLabel.innerHTML = '<span class="dot self"></span>Selected: <strong>' + STATION_BY_ID[selectedStationId].name + '</strong> — CHECK IN / TAG STOP will log here.';
+  } else {
+    mapSelectedLabel.textContent = 'No stop selected — tap one above, or rely on GPS.';
+  }
+  if (navigator.vibrate) navigator.vibrate(15);
+}
+
+function markNearestOnMap(id) {
+  lineMapSvg.querySelectorAll('.stop-dot').forEach(el => el.classList.toggle('nearest', el.dataset.id === id));
+}
+function markStationTagged(id) {
+  const dot = lineMapSvg.querySelector('.stop-dot[data-id="' + id + '"]');
+  if (dot) dot.classList.add('tagged');
+}
+
+buildLineMap();
+
+let currentPos = null;
+const geoCoords = document.getElementById('geoCoords');
+const geoMeta = document.getElementById('geoMeta');
+const geoEnableBtn = document.getElementById('geoEnableBtn');
+
+geoEnableBtn.addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    geoMeta.innerHTML = '<span class="dot" style="background:var(--error)"></span>Geolocation not supported in this browser.';
+    return;
+  }
+  geoMeta.textContent = 'Requesting permission…';
+  navigator.geolocation.watchPosition(onPosition, onPositionError, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
+  geoEnableBtn.style.display = 'none';
+});
+
+function onPosition(pos) {
+  currentPos = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy };
+  geoCoords.textContent = currentPos.lat.toFixed(5) + ', ' + currentPos.lon.toFixed(5);
+  const near = nearestStation(currentPos.lat, currentPos.lon);
+  geoMeta.innerHTML = '<span class="dot self"></span>±' + Math.round(currentPos.accuracy) + 'm · near ' + near.station.name + ' (' + Math.round(near.distance) + 'm)';
+  markNearestOnMap(near.station.id);
+}
+function onPositionError(err) {
+  geoMeta.innerHTML = '<span class="dot" style="background:var(--error)"></span>' + (err.code === 1 ? 'Location permission denied' : 'Location unavailable');
+  geoEnableBtn.style.display = 'inline-block';
+}
+
+let fieldLog = [];
+const fieldLogList = document.getElementById('fieldLogList');
+const fieldEmpty = document.getElementById('fieldEmpty');
+const fieldCount = document.getElementById('fieldCount');
+const noteInput = document.getElementById('noteInput');
+
+function addFieldEntry(type) {
+  // A tap on the Line Map always wins over GPS: the Underground has no
+  // signal in the tunnels, so manual station selection is the primary way
+  // to georeference a note while doing fieldwork on the platform.
+  const selected = selectedStationId ? STATION_BY_ID[selectedStationId] : null;
+  const near = !selected && currentPos ? nearestStation(currentPos.lat, currentPos.lon) : null;
+  const station = selected || (near ? near.station : null);
+  const entry = {
+    id: Date.now(),
+    type,
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    lat: selected ? selected.lat.toFixed(5) : (currentPos ? currentPos.lat.toFixed(5) : '—'),
+    lon: selected ? selected.lon.toFixed(5) : (currentPos ? currentPos.lon.toFixed(5) : '—'),
+    station: station ? station.name : '—',
+    source: selected ? 'map tag' : (currentPos ? 'GPS' : '—'),
+    note: noteInput.value.trim()
+  };
+  fieldLog.unshift(entry);
+  noteInput.value = '';
+  if (selectedStationId) selectStation(selectedStationId); // clears selection + map highlight
+  if (station) markStationTagged(station.id); // successful tag — node turns yellow
+  renderFieldLog();
+  if (navigator.vibrate) navigator.vibrate(type === 'Check-in' ? 40 : [20, 40, 20]);
+
+  // Also feed this into the homepage Datalog (not just the Field view's own
+  // list, and not the Mesh panel — that's for node-to-node relay events).
+  // Sensor columns have nothing to show for a check-in/tag, so they're
+  // dashed out; the station + note ride in the Location/Note column instead.
+  addLogRow({
+    time: entry.time, type: entry.type, source: 'field',
+    pm1: '—', pm25: '—', pm10: '—', co2: '—', db: '—',
+    magX: '—', magY: '—', magZ: '—', pressure: '—', humidity: '—', gas: '—',
+    loc: station ? (station.name + (entry.note ? ' · ' + entry.note : '')) : (entry.note || '—')
+  });
+}
+
+function renderFieldLog() {
+  fieldEmpty.style.display = fieldLog.length ? 'none' : 'block';
+  fieldCount.textContent = fieldLog.length + (fieldLog.length === 1 ? ' entry' : ' entries');
+  fieldLogList.innerHTML = fieldLog.map(e => `
+    <div class="field-entry">
+      <button class="field-entry-del" data-id="${e.id}" aria-label="Delete entry">✕</button>
+      <div class="field-entry-main">
+        <span class="field-entry-type ${e.type === 'Check-in' ? 'accent' : ''}">${e.type}</span>
+        <span class="field-entry-time mono">${e.time}</span>
+      </div>
+      <div class="field-entry-meta">${e.station} · ${e.lat}, ${e.lon}${e.source ? ' · ' + e.source : ''}</div>
+      ${e.note ? `<div class="field-entry-note">"${e.note}"</div>` : ''}
+    </div>`).join('');
+  fieldLogList.querySelectorAll('.field-entry-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      fieldLog = fieldLog.filter(e => e.id !== Number(btn.dataset.id));
+      renderFieldLog();
+    });
+  });
+}
+
+document.getElementById('checkInBtn').addEventListener('click', () => addFieldEntry('Check-in'));
+document.getElementById('tagStopBtn').addEventListener('click', () => addFieldEntry('Tag'));
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  if (!fieldLog.length) return;
+  const header = 'type,time,lat,lon,station,source,note\n';
+  const rows = fieldLog.map(e => [e.type, e.time, e.lat, e.lon, e.station, e.source || '', '"' + e.note.replace(/"/g, '""') + '"'].join(',')).join('\n');
+  const blob = new Blob([header + rows], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'field-log.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+/* ================================================================
+   View switching (Monitor / Field)
+   ================================================================ */
+document.querySelectorAll('.viewTab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.viewTab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById(tab.dataset.view).classList.add('active');
+  });
+});
+
+/* ================================================================
+   Simulation loop — stands in for real BLE notifications. Runs
+   every 3s for easy viewing; drop to the real cadence once wired
+   to hardware.
+   ================================================================ */
+let simulating = true;
+setInterval(() => {
+  if (!simulating) return;
+  tick++;
+  const source = Math.random() < 0.7 ? 'self' : 'peer';
+  METRICS.forEach(m => pushMetricSample(m.id, generateSample(m.id, source)));
+  drawChart();
+
+  const latest = id => seriesData[id][seriesData[id].length - 1];
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  addLogRow({
+    time: timeStr, source,
+    pm1: latest('pm1').value.toFixed(1), pm25: latest('pm25').value.toFixed(1), pm10: latest('pm10').value.toFixed(1),
+    co2: latest('co2').value.toFixed(0), db: latest('sound').value.toFixed(1),
+    magX: latest('magX').value.toFixed(2), magY: latest('magY').value.toFixed(2), magZ: latest('magZ').value.toFixed(2),
+    pressure: latest('pressure').value.toFixed(1), humidity: latest('humidity').value.toFixed(1), gas: latest('gas').value.toFixed(0)
+  });
+
+  if (Math.random() < 0.3) {
+    const eventType = Math.random() < 0.5 ? 'Sent' : 'Received';
+    const note = STATIONS[Math.floor(Math.random() * (STATIONS.length - 1))].name + ' → ' + STATIONS[Math.floor(Math.random() * (STATIONS.length - 1)) + 1].name;
+    addMeshRow(eventType, timeStr, source, note);
+  }
+}, 3000);
+
+renderFieldLog();
+drawChart();
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>
