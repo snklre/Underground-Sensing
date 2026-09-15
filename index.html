@@ -347,6 +347,7 @@
           </table>
         </div>
       </div>
+      <button id="exportDatalogBtn" class="btn btn-ghost btn-block" style="margin-top:10px;">Export CSV</button>
     </div>
 
     <div class="panel">
@@ -695,6 +696,13 @@ const logBody = document.getElementById('logBody');
 const archiveBody = document.getElementById('archiveBody');
 const MAX_LIVE_ROWS = 12;
 let liveRows = [];
+// Full history of every row ever logged, kept separately from liveRows
+// (which only holds the last MAX_LIVE_ROWS for the visible table) and
+// from the archive table (which only stores rendered HTML, not data) —
+// this is what the CSV export reads from. Capped so a long fieldwork
+// session doesn't grow this unboundedly in memory.
+const allLogRows = [];
+const MAX_LOGGED_ROWS = 5000;
 
 function addLogRow(row) {
   liveRows.unshift(row);
@@ -705,6 +713,8 @@ function addLogRow(row) {
     tr.innerHTML = rowHTML(overflow);
     archiveBody.prepend(tr);
   }
+  allLogRows.push(row);
+  if (allLogRows.length > MAX_LOGGED_ROWS) allLogRows.shift();
   renderLog();
 }
 // Field check-ins/tags are logged through this same function (see
@@ -728,6 +738,25 @@ document.getElementById('archiveToggle').addEventListener('click', function () {
   const showing = pane.style.display === 'block';
   pane.style.display = showing ? 'none' : 'block';
   this.textContent = showing ? 'Show archive' : 'Hide archive';
+});
+
+document.getElementById('exportDatalogBtn').addEventListener('click', () => {
+  if (!allLogRows.length) return;
+  const header = 'time,type,source,pm1_0,pm2_5,pm10,co2,sound_db,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note\n';
+  const csvField = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  // allLogRows is oldest-first (push order); flip so the export reads
+  // newest-first, matching how the on-screen Datalog table is shown.
+  const rows = [...allLogRows].reverse().map(r => [
+    r.time, r.type || 'Reading', r.source,
+    r.pm1, r.pm25, r.pm10, r.co2, r.db,
+    r.magX, r.magY, r.magZ, r.pressure, r.humidity, r.gas,
+    r.loc || ''
+  ].map(csvField).join(',')).join('\n');
+  const blob = new Blob([header + rows], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'datalog.csv'; a.click();
+  URL.revokeObjectURL(url);
 });
 
 /* ================================================================
