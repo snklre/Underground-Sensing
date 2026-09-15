@@ -281,7 +281,7 @@
     <div class="brand-name">UNDERGROUND SENSING</div>
     <div class="brand-status mono" id="btStatus"><span class="dot"></span>simulated data</div>
   </div>
-  <button id="connectBtn" class="btn btn-outline btn-sm">CONNECT</button>
+  <button id="connectBtn" class="btn btn-outline btn-sm">CONNECT NODE</button>
 </header>
 
 <div class="viewTabs">
@@ -293,16 +293,16 @@
 
   <div id="monitorView" class="view active">
     <div class="panel">
-      <h2>Signal Field<span class="hint" id="pixelHint">reading: sound</span></h2>
+      <h2>Signal Field<span class="hint">particulate density · sound flicker</span></h2>
       <canvas id="pixelViz" width="480" height="480"></canvas>
-      <div class="pixel-readout mono" id="pixelReadout">— — · — —</div>
-      <div class="note"></div>
+      <div class="pixel-readout mono" id="pixelReadout">PM2.5 — µg/m³ · — dB</div>
+      <div class="note">Pixel density tracks particulate load (PM2.5 + PM10); flicker rate tracks ambient sound. Scroll down for trends and spikes.</div>
     </div>
 
     <div class="panel">
       <h2>Trends and Spikes<span class="hint">station to station</span></h2>
       <div class="tabs" id="metricTabs"></div>
-      <div class="legend">
+      <div class="legend" id="chartLegend">
         <span><span class="swatch" style="background:var(--ink)"></span>self</span>
         <span><span class="swatch" style="background:var(--peer)"></span>peer</span>
         <span><span class="swatch" style="background:var(--ink-dim)"></span>rolling avg</span>
@@ -347,7 +347,6 @@
           </table>
         </div>
       </div>
-      <button id="exportDatalogBtn" class="btn btn-ghost btn-block" style="margin-top:10px;">Export session CSV</button>
     </div>
 
     <div class="panel">
@@ -418,6 +417,65 @@ const TIME_SYNC_CHAR_UUID      = 'b3c9a003-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // writ
 const btStatus = document.getElementById('btStatus');
 document.getElementById('connectBtn').addEventListener('click', connectBluetooth);
 
+// ----------------------------------------------------------------
+// Multi-node connection tracking. Each physical XIAO advertises the
+// same service UUID but a distinct name (e.g. "Underground Sensing-
+// Node A" / "...-Node B" — see NODE_BLE_NAME in the firmware), so the
+// browser's device picker shows them as two separate entries. Clicking
+// CONNECT NODE opens the picker each time; picking a device you
+// haven't connected yet adds it here rather than replacing whatever
+// was connected before. Keyed by device.id so the same physical node
+// is never double-added if the user clicks Connect again.
+// ----------------------------------------------------------------
+const connections = new Map(); // device.id -> { device, label, connected }
+
+// Colours assigned per node label, in connection order. First two match
+// the original self/peer palette; anything beyond that (a third node,
+// if the mesh ever grows) falls back to further palette entries rather
+// than erroring.
+const NODE_COLOR_PALETTE = ['#15140F', '#A8A69C', '#C9A227', '#5B7A8C'];
+const nodeColorAssignment = {};
+function colorForSource(source) {
+  if (source === 'self') return NODE_COLOR_PALETTE[0];
+  if (source === 'peer') return NODE_COLOR_PALETTE[1];
+  if (!(source in nodeColorAssignment)) {
+    const n = Object.keys(nodeColorAssignment).length;
+    nodeColorAssignment[source] = NODE_COLOR_PALETTE[n % NODE_COLOR_PALETTE.length];
+  }
+  return nodeColorAssignment[source];
+}
+
+function updateBtStatus() {
+  const list = [...connections.values()];
+  if (!list.length) {
+    btStatus.innerHTML = '<span class="dot"></span>simulated data';
+  } else {
+    btStatus.innerHTML = list.map(c => {
+      const dotStyle = c.connected ? ('background:' + colorForSource(c.label)) : 'background:var(--error)';
+      return '<span class="dot" style="' + dotStyle + '"></span>' + c.label + (c.connected ? '' : ' (disconnected)');
+    }).join(' &nbsp; ');
+  }
+  renderLegend();
+}
+
+// Chart legend swatches follow whichever nodes are actually connected
+// (falls back to the simulated self/peer pair when nothing is
+// connected yet), so the legend always matches what the chart is
+// really plotting rather than assuming exactly two fixed sources.
+function renderLegend() {
+  const legend = document.getElementById('chartLegend');
+  if (!legend) return;
+  const list = [...connections.values()];
+  const nodeList = list.length
+    ? list.map(c => ({ label: c.label, color: colorForSource(c.label) }))
+    : [{ label: 'self', color: colorForSource('self') }, { label: 'peer', color: colorForSource('peer') }];
+  const nodeSwatches = nodeList.map(n =>
+    `<span><span class="swatch" style="background:${n.color}"></span>${n.label}</span>`).join('');
+  legend.innerHTML = nodeSwatches +
+    '<span><span class="swatch" style="background:var(--ink-dim)"></span>rolling avg</span>' +
+    '<span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>trend band</span>';
+}
+
 async function connectBluetooth() {
   if (!navigator.bluetooth) {
     btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Web Bluetooth unavailable — use Bluefy on iOS, or Chrome on Android/desktop.';
@@ -425,36 +483,51 @@ async function connectBluetooth() {
   }
   try {
     const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [UNDERSENSED_SERVICE_UUID] }] });
-    btStatus.innerHTML = '<span class="dot accent"></span>Connecting to ' + device.name + '…';
+
+    if (connections.has(device.id) && connections.get(device.id).connected) {
+      updateBtStatus(); // already connected to this exact node — nothing to do
+      return;
+    }
+
+    const label = device.name || ('Node ' + (connections.size + 1));
+    const conn = { device, label, connected: false };
+    connections.set(device.id, conn);
+    updateBtStatus();
+
     const server = await device.gatt.connect();
     const service = await server.getPrimaryService(UNDERSENSED_SERVICE_UUID);
 
     const sensorChar = await service.getCharacteristic(SENSOR_DATA_CHAR_UUID);
     await sensorChar.startNotifications();
-    sensorChar.addEventListener('characteristicvaluechanged', handleSensorNotification);
+    sensorChar.addEventListener('characteristicvaluechanged', (e) => handleSensorNotification(e, conn));
 
     const meshChar = await service.getCharacteristic(MESH_EVENT_CHAR_UUID);
     await meshChar.startNotifications();
-    meshChar.addEventListener('characteristicvaluechanged', handleMeshNotification);
+    meshChar.addEventListener('characteristicvaluechanged', (e) => handleMeshNotification(e, conn));
 
     const timeSyncChar = await service.getCharacteristic(TIME_SYNC_CHAR_UUID);
     const epochBuf = new ArrayBuffer(4);
     new DataView(epochBuf).setUint32(0, Math.floor(Date.now() / 1000), true);
     await timeSyncChar.writeValue(epochBuf);
 
-    btStatus.innerHTML = '<span class="dot accent"></span>Connected — ' + device.name + ' (time synced)';
+    conn.connected = true;
     simulating = false;
+    updateBtStatus();
 
     device.addEventListener('gattserverdisconnected', () => {
-      btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Disconnected';
-      simulating = true;
+      conn.connected = false;
+      updateBtStatus();
+      // Only fall back to simulated data if every connected node has
+      // dropped — one node dropping shouldn't blank out the other's feed.
+      if (![...connections.values()].some(c => c.connected)) simulating = true;
     });
   } catch (err) {
     btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Connection failed: ' + err.message;
+    updateBtStatus();
   }
 }
 
-function handleSensorNotification(event) {
+function handleSensorNotification(event, conn) {
   const v = event.target.value;
   const ERROR_VALUE = -9999;
   const readOrNull = (offset) => { const val = v.getFloat32(offset, true); return val === ERROR_VALUE ? null : val; };
@@ -463,7 +536,11 @@ function handleSensorNotification(event) {
   const pressure = readOrNull(32), co2 = readOrNull(36), soundDb = readOrNull(40);
   const pm1 = readOrNull(44), pm25 = readOrNull(48), pm10 = readOrNull(52);
   const humidity = readOrNull(56), gasResistance = readOrNull(60);
-  const source = v.getUint8(65) === 0 ? 'self' : 'peer';
+  // Source is now which physical BLE node this notification arrived
+  // from (conn.label), not the old single-connection self/peer byte —
+  // with two independent connections open at once, the connection
+  // itself already tells us which node the reading is from.
+  const source = conn.label;
 
   tick++;
   [['sound', soundDb], ['pm1', pm1], ['pm25', pm25], ['pm10', pm10], ['co2', co2],
@@ -482,11 +559,11 @@ function handleSensorNotification(event) {
 }
 function fmt(val, decimals) { return val !== null && val !== undefined ? val.toFixed(decimals) : 'error'; }
 
-function handleMeshNotification(event) {
+function handleMeshNotification(event, conn) {
   const text = new TextDecoder().decode(event.target.value);
   const [eventType, detail] = text.split(',');
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  addMeshRow(eventType, timeStr, eventType === 'Sent' ? 'self' : 'peer', detail || '—');
+  addMeshRow(eventType, timeStr, conn.label, detail || '—');
 }
 
 /* ================================================================
@@ -498,8 +575,6 @@ const METRICS = [
   { id: 'magY', label: 'Mag Y' }, { id: 'magZ', label: 'Mag Z' }, { id: 'pressure', label: 'Pressure' },
   { id: 'humidity', label: 'Humidity' }, { id: 'gas', label: 'Gas Res.' },
 ];
-const METRIC_BY_ID = {};
-METRICS.forEach(m => METRIC_BY_ID[m.id] = m);
 // Magnetometer axes and gas resistance stay out of the centre chart (too
 // noisy to read as a trend) but still get generated and logged for the
 // datalog table below.
@@ -620,14 +695,8 @@ const logBody = document.getElementById('logBody');
 const archiveBody = document.getElementById('archiveBody');
 const MAX_LIVE_ROWS = 12;
 let liveRows = [];
-// Full session history in insertion order, kept separately from liveRows
-// (which only holds the 12 rows currently on screen) and the archive pane
-// (which only holds rendered HTML) — this is what "Export session CSV"
-// downloads from, so nothing is lost once a row scrolls into the archive.
-let allLogRows = [];
 
 function addLogRow(row) {
-  allLogRows.push(row);
   liveRows.unshift(row);
   if (liveRows.length > MAX_LIVE_ROWS) {
     const overflow = liveRows.pop();
@@ -644,7 +713,8 @@ function addLogRow(row) {
 // Field view's own list or the Mesh panel.
 function isFieldRow(row) { return row.type && row.type !== 'Reading'; }
 function rowHTML(row) {
-  return `<td>${row.time}</td><td>${row.type || 'Reading'}</td><td class="${row.source}">${row.source}</td>` +
+  const srcStyle = row.source === 'field' ? '' : ('color:' + colorForSource(row.source) + ';font-weight:600;');
+  return `<td>${row.time}</td><td>${row.type || 'Reading'}</td><td style="${srcStyle}">${row.source}</td>` +
          `<td>${row.pm1}</td><td>${row.pm25}</td><td>${row.pm10}</td>` +
          `<td>${row.co2}</td><td>${row.db}</td>` +
          `<td>${row.magX}</td><td>${row.magY}</td><td>${row.magZ}</td>` +
@@ -660,28 +730,14 @@ document.getElementById('archiveToggle').addEventListener('click', function () {
   this.textContent = showing ? 'Show archive' : 'Hide archive';
 });
 
-document.getElementById('exportDatalogBtn').addEventListener('click', () => {
-  if (!allLogRows.length) return;
-  const header = 'time,type,source,pm1_0,pm2_5,pm10,co2,sound_db,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note\n';
-  const rows = allLogRows.map(r => [
-    r.time, r.type || 'Reading', r.source,
-    r.pm1, r.pm25, r.pm10, r.co2, r.db, r.magX, r.magY, r.magZ, r.pressure, r.humidity, r.gas,
-    '"' + String(r.loc || '').replace(/"/g, '""') + '"'
-  ].join(',')).join('\n');
-  const blob = new Blob([header + rows], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'undersensed-datalog.csv'; a.click();
-  URL.revokeObjectURL(url);
-});
-
 /* ================================================================
    Mesh table
    ================================================================ */
 const meshBody = document.getElementById('meshBody');
 function addMeshRow(event, time, source, note) {
   const tr = document.createElement('tr');
-  tr.innerHTML = `<td>${event}</td><td>${time}</td><td class="${source}">${source}</td><td>${note}</td>`;
+  const srcStyle = 'color:' + colorForSource(source) + ';font-weight:600;';
+  tr.innerHTML = `<td>${event}</td><td>${time}</td><td style="${srcStyle}">${source}</td><td>${note}</td>`;
   meshBody.prepend(tr);
   while (meshBody.children.length > 10) meshBody.removeChild(meshBody.lastChild);
 }
@@ -767,9 +823,9 @@ function drawChart() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Live readings — black for self, grey for peer
+  // Live readings — colour follows which node the sample came from
   for (let i = 1; i < data.length; i++) {
-    ctx.strokeStyle = data[i].source === 'self' ? PALETTE.ink : PALETTE.peer;
+    ctx.strokeStyle = colorForSource(data[i].source);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(xAt(i - 1), yAt(data[i - 1].value));
@@ -787,46 +843,19 @@ function drawChart() {
 const pixelCanvas = document.getElementById('pixelViz');
 const pixelCtx = pixelCanvas.getContext('2d');
 const pixelReadout = document.getElementById('pixelReadout');
-const pixelHint = document.getElementById('pixelHint');
 const PIXEL_COLS = 120, PIXEL_ROWS = 120;
 const pixelGrid = new Float32Array(PIXEL_COLS * PIXEL_ROWS);
 
-// Typical min/max range the circle expects to see per metric, used to
-// normalize whichever one is currently selected in Trends and Spikes into
-// a 0–1 density. Loose real-world bands, not sensor spec limits.
-const VIZ_RANGE = {
-  sound:    { min: 30,  max: 100 },
-  pm1:      { min: 0,   max: 40  },
-  pm25:     { min: 0,   max: 70  },
-  pm10:     { min: 0,   max: 100 },
-  co2:      { min: 400, max: 1500 },
-  pressure: { min: 990, max: 1030 },
-  humidity: { min: 20,  max: 90  },
-};
-const UNIT_FOR = { sound: 'dB', pm1: 'µg/m³', pm25: 'µg/m³', pm10: 'µg/m³', co2: 'ppm', pressure: 'hPa', humidity: '%' };
-const DECIMALS_FOR = { sound: 1, pm1: 1, pm25: 1, pm10: 1, co2: 0, pressure: 1, humidity: 1 };
-
 function pixelReadLatest() {
   const last = id => { const arr = seriesData[id]; return arr.length ? arr[arr.length - 1].value : baselineFor(id); };
-  const metric = activeMetric; // whichever tab is selected in Trends and Spikes
-  const value = last(metric);
-  const range = VIZ_RANGE[metric] || VIZ_RANGE.pm25;
-
-  // Density: where the current reading sits in that metric's typical range.
-  const density = Math.min(1, Math.max(0.04, (value - range.min) / (range.max - range.min)));
-
-  // Chaos (flicker rate): how far recent samples have strayed from their
-  // own short rolling average, scaled against a "typical wobble" band for
-  // this metric — so a real spike (the kind the Trends and Spikes chart
-  // flags) reads as a burst of flicker, and calm/steady readings stay
-  // near-still, whichever metric is active.
-  const recent = seriesData[metric].slice(-15).map(p => p.value);
-  const avg = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : value;
-  const wobbleBand = (range.max - range.min) * 0.12;
-  const deviation = recent.length ? Math.max(...recent.map(v => Math.abs(v - avg))) : 0;
-  const chaos = Math.min(1, Math.max(0.015, deviation / wobbleBand));
-
-  return { metric, value, density, chaos };
+  const pm25 = last('pm25'), pm10 = last('pm10'), sound = last('sound');
+  return {
+    pm25, sound,
+    density: Math.min(1, Math.max(0.04, (pm25 + pm10 * 0.5) / 70)),
+    // Raised floor (baseline sound ~55dB) — quiet, steady conditions stay
+    // near-still; only real spikes above baseline push chaos up.
+    chaos: Math.min(1, Math.max(0.015, (sound - 58) / 55)),
+  };
 }
 
 function stepPixelField() {
@@ -861,10 +890,8 @@ function pixelLoop(ts) {
     pixelLastFrame = ts;
     stepPixelField();
     drawPixelField();
-    const { metric, value } = pixelReadLatest();
-    const label = METRIC_BY_ID[metric] ? METRIC_BY_ID[metric].label : metric;
-    pixelReadout.textContent = label + ' ' + value.toFixed(DECIMALS_FOR[metric] ?? 1) + ' ' + (UNIT_FOR[metric] || '');
-    pixelHint.textContent = 'reading: ' + label.toLowerCase();
+    const { pm25, sound } = pixelReadLatest();
+    pixelReadout.textContent = 'PM2.5 ' + pm25.toFixed(1) + ' µg/m³ · ' + sound.toFixed(1) + ' dB';
   }
   requestAnimationFrame(pixelLoop);
 }
@@ -1081,6 +1108,7 @@ setInterval(() => {
 }, 3000);
 
 renderFieldLog();
+renderLegend();
 drawChart();
 window.addEventListener('resize', drawChart);
 </script>
