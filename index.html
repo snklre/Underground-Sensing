@@ -157,6 +157,7 @@
   td.field { color: var(--ink); font-weight: 600; }
   .data-table tr.field-row td { background: var(--accent-dim); }
   .data-table tr.field-row td:first-child { background: var(--accent-dim); }
+  .archived-cell { color: var(--peer); font-style: italic; border-bottom: 1px dashed var(--peer); cursor: help; }
   .data-table td.log-note { white-space: normal; min-width: 140px; }
   .table-scroll { max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: 2px; }
 
@@ -307,9 +308,10 @@
         <span><span class="swatch" style="background:var(--ink-dim)"></span>sim rolling avg</span>
         <span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>sim trend (today)</span>
         <span><span class="swatch" style="background:var(--error)"></span>spike vs sim</span>
+        <span><span class="swatch" style="background:var(--peer)"></span>archived avg fallback</span>
       </div>
       <canvas id="mainChart" width="900" height="300"></canvas>
-      <div class="note">Yellow band = a simulated trend/spike model for today, shown only as a comparison reference. Black/grey points are live sensor readings; red points flag spikes against that reference. Station markers show your real Check-in/Tag stops once logged in Field (yellow dot = Tag, black = Check-in), placed exactly where they happened on the timeline — evenly-spaced placeholder dots show only until your first real check-in.</div>
+      <div class="note">Yellow band = a simulated trend/spike model for today, shown only as a comparison reference. Black/grey points are live sensor readings; red points flag spikes against that reference. Dashed grey stretches/hollow dots are the archived-average fallback, filled in once a node is flagged (see "!" next to its name) and its last good value stops being repeated. Station markers show your real Check-in/Tag stops once logged in Field (yellow dot = Tag, black = Check-in), placed exactly where they happened on the timeline — evenly-spaced placeholder dots show only until your first real check-in.</div>
     </div>
 
     <div class="panel">
@@ -330,7 +332,7 @@
           <tbody id="logBody"></tbody>
         </table>
       </div>
-      <div class="note">Only live readings from a connected node, plus your own field check-ins/tags, are logged here — nothing simulated.</div>
+      <div class="note">Live readings from a connected node, your own field check-ins/tags, and — once a node is flagged (dashed, dimmed cells) — an archived-average fallback for whichever metrics are failing to read, are logged here.</div>
       <button id="archiveToggle" style="display:none;">Show archive</button>
       <div id="archivePane" style="display:none !important;">
         <div class="table-scroll">
@@ -457,7 +459,7 @@ function updateBtStatus() {
     btStatus.innerHTML = list.map(c => {
       const dotStyle = c.connected ? ('background:' + colorForSource(c.label)) : 'background:var(--error)';
       const flag = (c.connected && needsAttention[c.label])
-        ? ' <span style="color:var(--error);cursor:default;" title="Repeated read errors from this node — try wiggling the wiring, or pull this up on a laptop for more detail">!</span>'
+        ? ' <span style="color:var(--error);cursor:default;" title="Repeated read errors from this node — try wiggling the wiring, or pull this up on a laptop for more detail. Affected metrics are now showing an archived-average fallback instead of a flat repeat.">!</span>'
         : '';
       return '<span class="dot" style="' + dotStyle + '"></span>' + c.label + (c.connected ? '' : ' (disconnected)') + flag;
     }).join(' &nbsp; ');
@@ -480,7 +482,8 @@ function renderLegend() {
   legend.innerHTML = nodeSwatches +
     '<span><span class="swatch" style="background:var(--ink-dim)"></span>sim rolling avg</span>' +
     '<span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>sim trend (today)</span>' +
-    '<span><span class="swatch" style="background:var(--error)"></span>spike vs sim</span>';
+    '<span><span class="swatch" style="background:var(--error)"></span>spike vs sim</span>' +
+    '<span><span class="swatch" style="background:var(--peer)"></span>archived avg fallback</span>';
 }
 
 async function connectBluetooth() {
@@ -574,8 +577,9 @@ function handleSensorNotification(event, conn) {
    ['humidity', humidity], ['gas', gasResistance]];
 
   let flagged = false;
-  const heldIds = []; // metric ids repeated this tick, for the CSV-only provenance column below
-  const resolved = {}; // the value actually logged to the Datalog/CSV this tick — real, or a quietly repeated last-good value
+  const heldIds = []; // metric ids repeated this tick (below the attention threshold), for the CSV-only provenance column below
+  const archivedIds = []; // metric ids filled from the archived-log average this tick (at/past the attention threshold) — same provenance idea, kept separate from heldIds
+  const resolved = {}; // the value actually logged to the Datalog/CSV this tick — real, a quietly repeated last-good value, or an archived-average fallback
   readings.forEach(([id, val]) => {
     if (val !== null) {
       lastGoodValue[source][id] = val;
@@ -591,9 +595,23 @@ function handleSensorNotification(event, conn) {
       pushMetricSample(id, { t: tick, value: val, source });
     } else {
       errorStreak[source][id] = (errorStreak[source][id] || 0) + 1;
-      resolved[id] = (id in lastGoodValue[source]) ? lastGoodValue[source][id] : null; // nothing to repeat yet on a first-ever error
-      if (resolved[id] !== null) heldIds.push(id);
-      if (errorStreak[source][id] >= ATTENTION_STREAK_THRESHOLD) flagged = true;
+      const streak = errorStreak[source][id];
+      if (streak >= ATTENTION_STREAK_THRESHOLD) {
+        // This metric has now crossed into "!" territory on this node —
+        // a flat repeat of the last good value stops being useful this
+        // far into an outage, so from here it's replaced with a simulated
+        // reading centred on the archived log average (see ARCHIVE_MEANS).
+        // Unlike a hold, this DOES reach the chart, tagged `archived: true`
+        // so it's drawn and read distinctly from a live point.
+        const archived = archivedSample(id);
+        resolved[id] = archived;
+        archivedIds.push(id);
+        pushMetricSample(id, { t: tick, value: archived, source, archived: true });
+      } else {
+        resolved[id] = (id in lastGoodValue[source]) ? lastGoodValue[source][id] : null; // nothing to repeat yet on a first-ever error
+        if (resolved[id] !== null) heldIds.push(id);
+      }
+      if (streak >= ATTENTION_STREAK_THRESHOLD) flagged = true;
     }
   });
 
@@ -616,7 +634,11 @@ function handleSensorNotification(event, conn) {
     // quiet paper trail of which cells in this row were a repeated
     // value rather than a fresh reading, in case a sensor stays down
     // for good and this needs to be cleaned up in post-processing.
-    held: heldIds.join(' ')
+    held: heldIds.join(' '),
+    // Unlike `held`, this one IS read by rowHTML below — it's what
+    // dims/underlines a cell in the Datalog to show it came from the
+    // archived-average fallback rather than the node.
+    archived: archivedIds.join(' ')
   });
 }
 function fmt(val, decimals) { return val !== null && val !== undefined ? val.toFixed(decimals) : 'error'; }
@@ -751,6 +773,35 @@ CHART_METRICS.forEach(m => {
 function baselineFor(id) { return { sound:55, pm25:12, pm5:14, pm10:18, co2:550, accelX:0, accelY:0, accelZ:1, magX:20, magY:-20, magZ:55, pressure:1010, humidity:55, gas:13000 }[id]; }
 function spikeChanceFor(id) { return { sound:0.12, pm25:0.08, pm5:0.06, pm10:0.08, co2:0.06, accelX:0.08, accelY:0.08, accelZ:0.06, magX:0.04, magY:0.04, magZ:0.04, pressure:0.02, humidity:0.03, gas:0.05 }[id]; }
 
+/* ================================================================
+   Archived-average fallback — per-metric means computed offline from
+   three real Node A field sessions (undersensed_log_node_a_20260915_
+   195402 / 200155 / 200323.csv — ~7,900 rows combined, error cells
+   excluded from the average). Used ONLY once a metric's read-error
+   streak on a connected node crosses ATTENTION_STREAK_THRESHOLD — the
+   same moment the "!" is raised next to that node's name below — so a
+   real outage stops flat-repeating the last good value and instead
+   fills in with something drawn from the archive instead. pm5 wasn't
+   a recorded column in those sessions, so it's approximated as the
+   midpoint of the archived pm2.5/pm10 means, matching how baselineFor
+   above already treats it.
+   ================================================================ */
+const ARCHIVE_MEANS = {
+  sound: 49.62, pm25: 8.592, pm5: 8.678, pm10: 8.764, co2: 169.599,
+  accelX: -0.151, accelY: -5.038, accelZ: -4.32,
+  magX: -343.874, magY: 189.568, magZ: -239.664,
+  pressure: 991.753, humidity: 59.258, gas: 18266.785,
+};
+// Same small-jitter shape as generateSample()'s noise term, just centred
+// on the archived mean instead of the live baseline, and with no spike
+// chance — this is a quiet fallback, not a simulated event.
+function archivedSample(id) {
+  const base = ARCHIVE_MEANS[id];
+  const scale = Math.max(Math.abs(base), 0.05);
+  const noise = (Math.random() - 0.5) * scale * 0.15;
+  return base + noise;
+}
+
 let tick = 0;
 function generateSample(id, source) {
   const base = baselineFor(id);
@@ -810,12 +861,20 @@ function addLogRow(row) {
 function isFieldRow(row) { return row.type && row.type !== 'Reading'; }
 function rowHTML(row) {
   const srcStyle = row.source === 'field' ? '' : ('color:' + colorForSource(row.source) + ';font-weight:600;');
+  const archivedSet = row.archived ? new Set(row.archived.split(' ').filter(Boolean)) : null;
+  // Wraps a cell's already-formatted text in a dashed, dimmed span when
+  // that metric was filled from the archived-average fallback this row,
+  // so it reads differently from a real reading at a glance without
+  // needing its own table column.
+  const cell = (metricId, text) => (archivedSet && archivedSet.has(metricId))
+    ? `<span class="archived-cell" title="Archived-average fallback — ${row.source} flagged, live read failing">${text}</span>`
+    : text;
   return `<td>${row.time}</td><td>${row.type || 'Reading'}</td><td style="${srcStyle}">${row.source}</td>` +
-         `<td>${row.pm25}</td><td>${row.pm5}</td><td>${row.pm10}</td>` +
-         `<td>${row.co2}</td><td>${row.db}</td>` +
-         `<td>${row.accelX}</td><td>${row.accelY}</td><td>${row.accelZ}</td>` +
-         `<td>${row.magX}</td><td>${row.magY}</td><td>${row.magZ}</td>` +
-         `<td>${row.pressure}</td><td>${row.humidity}</td><td>${row.gas}</td>` +
+         `<td>${cell('pm25', row.pm25)}</td><td>${cell('pm5', row.pm5)}</td><td>${cell('pm10', row.pm10)}</td>` +
+         `<td>${cell('co2', row.co2)}</td><td>${cell('sound', row.db)}</td>` +
+         `<td>${cell('accelX', row.accelX)}</td><td>${cell('accelY', row.accelY)}</td><td>${cell('accelZ', row.accelZ)}</td>` +
+         `<td>${cell('magX', row.magX)}</td><td>${cell('magY', row.magY)}</td><td>${cell('magZ', row.magZ)}</td>` +
+         `<td>${cell('pressure', row.pressure)}</td><td>${cell('humidity', row.humidity)}</td><td>${cell('gas', row.gas)}</td>` +
          `<td class="log-note">${row.loc || '—'}</td>`;
 }
 function renderLog() { logBody.innerHTML = liveRows.map(r => `<tr class="${isFieldRow(r) ? 'field-row' : ''}">${rowHTML(r)}</tr>`).join(''); }
@@ -889,7 +948,7 @@ document.getElementById('exportDatalogBtn').addEventListener('click', () => {
   const combined = [...olderArchive, ...allLogRows]; // oldest-first: archive, then this session
   if (!combined.length) return;
 
-  const header = 'time,type,source,pm2_5,pm5,pm10,co2,sound_db,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note,held_fields\n';
+  const header = 'time,type,source,pm2_5,pm5,pm10,co2,sound_db,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note,held_fields,archived_fields\n';
   const csvField = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   const toExport = INCLUDE_ARCHIVE_IN_DATALOG_EXPORT ? combined : allLogRows;
   // toExport is oldest-first (push order); flip so the export reads
@@ -899,7 +958,7 @@ document.getElementById('exportDatalogBtn').addEventListener('click', () => {
     r.pm25, r.pm5, r.pm10, r.co2, r.db,
     r.accelX, r.accelY, r.accelZ,
     r.magX, r.magY, r.magZ, r.pressure, r.humidity, r.gas,
-    r.loc || '', r.held || ''
+    r.loc || '', r.held || '', r.archived || ''
   ].map(csvField).join(',')).join('\n');
   downloadCSV('datalog-archive.csv', header + rows);
 
@@ -1035,19 +1094,37 @@ function drawChart() {
   ctx.setLineDash([]);
 
   if (liveData.length) {
-    // Live readings — colour follows which node the sample came from
+    // Live readings — colour follows which node the sample came from.
+    // A segment touching an archived-average fallback point switches to
+    // a dashed peer-grey line instead, so a filled-in stretch reads
+    // differently from a real run of readings at a glance.
     for (let i = 1; i < liveData.length; i++) {
-      ctx.strokeStyle = colorForSource(liveData[i].source);
+      const filled = liveData[i - 1].archived || liveData[i].archived;
+      ctx.strokeStyle = filled ? PALETTE.peer : colorForSource(liveData[i].source);
       ctx.lineWidth = 1.5;
+      if (filled) ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(xAt(liveData[i - 1].t), yAt(liveData[i - 1].value));
       ctx.lineTo(xAt(liveData[i].t), yAt(liveData[i].value));
       ctx.stroke();
+      if (filled) ctx.setLineDash([]);
     }
     // Spike flag — compare each live reading against the simulated
     // long-average at the nearest point in time; large deviations get a
-    // bigger red dot instead of the usual source colour.
+    // bigger red dot instead of the usual source colour. An archived-
+    // average fallback point is drawn as a small hollow peer-grey dot
+    // instead and skipped here — it isn't a real observation, so flagging
+    // it against the sim reference would only surface the archive/sim
+    // gap, never an actual spike.
     liveData.forEach(p => {
+      if (p.archived) {
+        ctx.beginPath();
+        ctx.arc(xAt(p.t), yAt(p.value), 2.5, 0, Math.PI * 2);
+        ctx.strokeStyle = PALETTE.peer;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        return;
+      }
       let nearestIdx = 0, bestDiff = Infinity;
       simData.forEach((sp, i) => {
         const diff = Math.abs(sp.t - p.t);
