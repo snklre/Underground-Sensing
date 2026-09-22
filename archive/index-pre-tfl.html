@@ -279,7 +279,7 @@
 <header>
   <div>
     <div class="brand-name">UNDERGROUND SENSING</div>
-    <div class="brand-status mono" id="btStatus"><span class="dot"></span>no sensor connected</div>
+    <div class="brand-status mono" id="btStatus"><span class="dot"></span>simulated data</div>
   </div>
   <button id="connectBtn" class="btn btn-outline btn-sm">CONNECT NODE</button>
 </header>
@@ -303,13 +303,13 @@
       <h2>Trends and Spikes<span class="hint">station to station</span></h2>
       <div class="tabs" id="metricTabs"></div>
       <div class="legend" id="chartLegend">
-        <span style="color:var(--ink-dim)">no live source connected</span>
-        <span><span class="swatch" style="background:var(--ink-dim)"></span>sim rolling avg</span>
-        <span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>sim trend (today)</span>
-        <span><span class="swatch" style="background:var(--error)"></span>spike vs sim</span>
+        <span><span class="swatch" style="background:var(--ink)"></span>self</span>
+        <span><span class="swatch" style="background:var(--peer)"></span>peer</span>
+        <span><span class="swatch" style="background:var(--ink-dim)"></span>rolling avg</span>
+        <span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>trend band</span>
       </div>
       <canvas id="mainChart" width="900" height="300"></canvas>
-      <div class="note">Yellow band = a simulated trend/spike model for today, shown only as a comparison reference. Black/grey points are live sensor readings; red points flag spikes against that reference. Station markers are illustrative until real dwell-detection events feed this chart.</div>
+      <div class="note">Station markers are illustrative until real dwell-detection events feed this chart.</div>
     </div>
 
     <div class="panel">
@@ -321,7 +321,6 @@
               <th>Time</th><th>Type</th><th>Src</th>
               <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
               <th>CO2</th><th>dB</th>
-              <th>AccelX</th><th>AccelY</th><th>AccelZ</th>
               <th>MagX</th><th>MagY</th><th>MagZ</th>
               <th>Pres.</th><th>Hum.</th><th>Gas</th>
               <th>Location / Note</th>
@@ -330,9 +329,8 @@
           <tbody id="logBody"></tbody>
         </table>
       </div>
-      <div class="note">Only live readings from a connected node, plus your own field check-ins/tags, are logged here — nothing simulated.</div>
-      <button id="archiveToggle" style="display:none;">Show archive</button>
-      <div id="archivePane" style="display:none !important;">
+      <button id="archiveToggle">Show archive</button>
+      <div id="archivePane">
         <div class="table-scroll">
           <table class="data-table">
             <thead>
@@ -340,7 +338,6 @@
                 <th>Time</th><th>Type</th><th>Src</th>
                 <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
                 <th>CO2</th><th>dB</th>
-                <th>AccelX</th><th>AccelY</th><th>AccelZ</th>
                 <th>MagX</th><th>MagY</th><th>MagZ</th>
                 <th>Pres.</th><th>Hum.</th><th>Gas</th>
                 <th>Location / Note</th>
@@ -452,7 +449,7 @@ function colorForSource(source) {
 function updateBtStatus() {
   const list = [...connections.values()];
   if (!list.length) {
-    btStatus.innerHTML = '<span class="dot"></span>no sensor connected';
+    btStatus.innerHTML = '<span class="dot"></span>simulated data';
   } else {
     btStatus.innerHTML = list.map(c => {
       const dotStyle = c.connected ? ('background:' + colorForSource(c.label)) : 'background:var(--error)';
@@ -462,22 +459,22 @@ function updateBtStatus() {
   renderLegend();
 }
 
-// Chart legend swatches follow whichever nodes are actually connected.
-// With nothing connected there is no live source to show — the legend
-// says so plainly rather than faking a self/peer pair — and the
-// simulated comparison band/avg/spike-flag entries are always shown
-// since that layer runs regardless of connection state.
+// Chart legend swatches follow whichever nodes are actually connected
+// (falls back to the simulated self/peer pair when nothing is
+// connected yet), so the legend always matches what the chart is
+// really plotting rather than assuming exactly two fixed sources.
 function renderLegend() {
   const legend = document.getElementById('chartLegend');
   if (!legend) return;
   const list = [...connections.values()];
-  const nodeSwatches = list.length
-    ? list.map(c => `<span><span class="swatch" style="background:${colorForSource(c.label)}"></span>${c.label}</span>`).join('')
-    : '<span style="color:var(--ink-dim)">no live source connected</span>';
+  const nodeList = list.length
+    ? list.map(c => ({ label: c.label, color: colorForSource(c.label) }))
+    : [{ label: 'self', color: colorForSource('self') }, { label: 'peer', color: colorForSource('peer') }];
+  const nodeSwatches = nodeList.map(n =>
+    `<span><span class="swatch" style="background:${n.color}"></span>${n.label}</span>`).join('');
   legend.innerHTML = nodeSwatches +
-    '<span><span class="swatch" style="background:var(--ink-dim)"></span>sim rolling avg</span>' +
-    '<span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>sim trend (today)</span>' +
-    '<span><span class="swatch" style="background:var(--error)"></span>spike vs sim</span>';
+    '<span><span class="swatch" style="background:var(--ink-dim)"></span>rolling avg</span>' +
+    '<span><span class="swatch" style="background:var(--accent); opacity:0.5"></span>trend band</span>';
 }
 
 async function connectBluetooth() {
@@ -515,11 +512,15 @@ async function connectBluetooth() {
     await timeSyncChar.writeValue(epochBuf);
 
     conn.connected = true;
+    simulating = false;
     updateBtStatus();
 
     device.addEventListener('gattserverdisconnected', () => {
       conn.connected = false;
       updateBtStatus();
+      // Only fall back to simulated data if every connected node has
+      // dropped — one node dropping shouldn't blank out the other's feed.
+      if (![...connections.values()].some(c => c.connected)) simulating = true;
     });
   } catch (err) {
     btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Connection failed: ' + err.message;
@@ -544,7 +545,6 @@ function handleSensorNotification(event, conn) {
 
   tick++;
   [['sound', soundDb], ['pm1', pm1], ['pm25', pm25], ['pm10', pm10], ['co2', co2],
-   ['accelX', accelX], ['accelY', accelY], ['accelZ', accelZ],
    ['magX', magX], ['magY', magY], ['magZ', magZ], ['pressure', pressure],
    ['humidity', humidity], ['gas', gasResistance]].forEach(([id, val]) => {
     if (val !== null) pushMetricSample(id, { t: tick, value: val, source });
@@ -554,9 +554,7 @@ function handleSensorNotification(event, conn) {
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   addLogRow({
     time: timeStr, source, pm1: fmt(pm1, 1), pm25: fmt(pm25, 1), pm10: fmt(pm10, 1),
-    co2: fmt(co2, 0), db: fmt(soundDb, 1),
-    accelX: fmt(accelX, 2), accelY: fmt(accelY, 2), accelZ: fmt(accelZ, 2),
-    magX: fmt(magX, 2), magY: fmt(magY, 2), magZ: fmt(magZ, 2),
+    co2: fmt(co2, 0), db: fmt(soundDb, 1), magX: fmt(magX, 2), magY: fmt(magY, 2), magZ: fmt(magZ, 2),
     pressure: fmt(pressure, 1), humidity: fmt(humidity, 1), gas: fmt(gasResistance, 0)
   });
 }
@@ -574,27 +572,17 @@ function handleMeshNotification(event, conn) {
    ================================================================ */
 const METRICS = [
   { id: 'sound', label: 'Sound' }, { id: 'pm1', label: 'PM1.0' }, { id: 'pm25', label: 'PM2.5' },
-  { id: 'pm10', label: 'PM10' }, { id: 'co2', label: 'CO2' },
-  { id: 'accelX', label: 'Accel X' }, { id: 'accelY', label: 'Accel Y' }, { id: 'accelZ', label: 'Accel Z' },
-  { id: 'magX', label: 'Mag X' }, { id: 'magY', label: 'Mag Y' }, { id: 'magZ', label: 'Mag Z' },
-  { id: 'pressure', label: 'Pressure' }, { id: 'humidity', label: 'Humidity' }, { id: 'gas', label: 'Gas Res.' },
+  { id: 'pm10', label: 'PM10' }, { id: 'co2', label: 'CO2' }, { id: 'magX', label: 'Mag X' },
+  { id: 'magY', label: 'Mag Y' }, { id: 'magZ', label: 'Mag Z' }, { id: 'pressure', label: 'Pressure' },
+  { id: 'humidity', label: 'Humidity' }, { id: 'gas', label: 'Gas Res.' },
 ];
-// Accelerometer + magnetometer axes and gas resistance stay out of the
-// centre chart (too noisy to read as a single trend) but still get
-// generated and logged for the datalog table below.
-const CHART_METRICS = METRICS.filter(m => !['accelX', 'accelY', 'accelZ', 'magX', 'magY', 'magZ', 'gas'].includes(m.id));
+// Magnetometer axes and gas resistance stay out of the centre chart (too
+// noisy to read as a trend) but still get generated and logged for the
+// datalog table below.
+const CHART_METRICS = METRICS.filter(m => !['magX', 'magY', 'magZ', 'gas'].includes(m.id));
 let activeMetric = CHART_METRICS[0].id;
-// Real sensor readings only — populated exclusively from BLE notifications
-// (handleSensorNotification below). Nothing simulated ever lands here.
 const seriesData = {};
 METRICS.forEach(m => seriesData[m.id] = []);
-// Simulated reference series — a modelled "typical day" trend/spike pattern
-// per metric, used ONLY to draw the comparison band in the chart below.
-// This never touches the Datalog, Mesh table, or CSV export — those stay
-// real-data-only.
-const simSeriesData = {};
-METRICS.forEach(m => simSeriesData[m.id] = []);
-const SIM_WINDOW = 600; // ~30 min of heartbeat history kept for the comparison band
 
 // Real Central line stations (West Ruislip/Ealing Broadway – Epping, incl.
 // Hainault Loop) — used for field geolocation AND for the Line Map SVG
@@ -685,19 +673,14 @@ CHART_METRICS.forEach(m => {
   tabsEl.appendChild(btn);
 });
 
-// Accel baseline is in g: X/Y sit near 0 at rest, Z carries gravity (~1g).
-function baselineFor(id) { return { sound:55, pm1:3, pm25:12, pm10:18, co2:550, accelX:0, accelY:0, accelZ:1, magX:20, magY:-20, magZ:55, pressure:1010, humidity:55, gas:13000 }[id]; }
-function spikeChanceFor(id) { return { sound:0.12, pm1:0.06, pm25:0.08, pm10:0.08, co2:0.06, accelX:0.08, accelY:0.08, accelZ:0.06, magX:0.04, magY:0.04, magZ:0.04, pressure:0.02, humidity:0.03, gas:0.05 }[id]; }
+function baselineFor(id) { return { sound:55, pm1:3, pm25:12, pm10:18, co2:550, magX:20, magY:-20, magZ:55, pressure:1010, humidity:55, gas:13000 }[id]; }
+function spikeChanceFor(id) { return { sound:0.12, pm1:0.06, pm25:0.08, pm10:0.08, co2:0.06, magX:0.04, magY:0.04, magZ:0.04, pressure:0.02, humidity:0.03, gas:0.05 }[id]; }
 
 let tick = 0;
 function generateSample(id, source) {
   const base = baselineFor(id);
-  // accelX/Y sit at a zero baseline, so noise/spikes are scaled off a
-  // small fixed floor instead of Math.abs(base) (which would be 0 and
-  // silence them entirely).
-  const scale = Math.max(Math.abs(base), 0.05);
-  const noise = (Math.random() - 0.5) * scale * 0.15;
-  const spike = Math.random() < spikeChanceFor(id) ? scale * (0.6 + Math.random() * 0.9) : 0;
+  const noise = (Math.random() - 0.5) * Math.abs(base) * 0.15;
+  const spike = Math.random() < spikeChanceFor(id) ? Math.abs(base) * (0.6 + Math.random() * 0.9) : 0;
   return { t: tick, value: base + noise + spike, source };
 }
 function pushMetricSample(id, sample) {
@@ -711,11 +694,6 @@ function pushMetricSample(id, sample) {
    ================================================================ */
 const logBody = document.getElementById('logBody');
 const archiveBody = document.getElementById('archiveBody');
-// The in-page "Show archive" pane (overflowed live rows) is turned off for
-// now — the button/pane are hidden in the markup above, and this flag stops
-// rows from being pushed into archiveBody at all. Flip to true (and remove
-// the display:none on #archiveToggle / #archivePane) to bring it back.
-const ARCHIVE_PANE_ENABLED = false;
 const MAX_LIVE_ROWS = 12;
 let liveRows = [];
 // Full history of every row ever logged, kept separately from liveRows
@@ -730,12 +708,10 @@ function addLogRow(row) {
   liveRows.unshift(row);
   if (liveRows.length > MAX_LIVE_ROWS) {
     const overflow = liveRows.pop();
-    if (ARCHIVE_PANE_ENABLED) {
-      const tr = document.createElement('tr');
-      if (isFieldRow(overflow)) tr.classList.add('field-row');
-      tr.innerHTML = rowHTML(overflow);
-      archiveBody.prepend(tr);
-    }
+    const tr = document.createElement('tr');
+    if (isFieldRow(overflow)) tr.classList.add('field-row');
+    tr.innerHTML = rowHTML(overflow);
+    archiveBody.prepend(tr);
   }
   allLogRows.push(row);
   if (allLogRows.length > MAX_LOGGED_ROWS) allLogRows.shift();
@@ -751,7 +727,6 @@ function rowHTML(row) {
   return `<td>${row.time}</td><td>${row.type || 'Reading'}</td><td style="${srcStyle}">${row.source}</td>` +
          `<td>${row.pm1}</td><td>${row.pm25}</td><td>${row.pm10}</td>` +
          `<td>${row.co2}</td><td>${row.db}</td>` +
-         `<td>${row.accelX}</td><td>${row.accelY}</td><td>${row.accelZ}</td>` +
          `<td>${row.magX}</td><td>${row.magY}</td><td>${row.magZ}</td>` +
          `<td>${row.pressure}</td><td>${row.humidity}</td><td>${row.gas}</td>` +
          `<td class="log-note">${row.loc || '—'}</td>`;
@@ -765,57 +740,23 @@ document.getElementById('archiveToggle').addEventListener('click', function () {
   this.textContent = showing ? 'Show archive' : 'Hide archive';
 });
 
-/* ----------------------------------------------------------------
-   CSV archive — persists across sessions in localStorage, so a
-   download is always "what you just collected" plus everything
-   saved from earlier downloads. Every export both reads and adds
-   to the archive. Set INCLUDE_ARCHIVE_IN_DATALOG_EXPORT to true to
-   actually fold the older archive into each new download — it's
-   left off for now, so today's download is just today's rows, but
-   every export still saves into the archive for whenever it's
-   switched on.
-   ---------------------------------------------------------------- */
-const DATALOG_ARCHIVE_KEY = 'undersensed_datalog_archive_v1';
-const MAX_ARCHIVED_ROWS = 5000;
-const INCLUDE_ARCHIVE_IN_DATALOG_EXPORT = false;
-
-function loadArchive(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) { return []; } // storage unavailable/corrupt — treat as empty
-}
-function saveArchive(key, rows) {
-  try { localStorage.setItem(key, JSON.stringify(rows.slice(-MAX_ARCHIVED_ROWS))); }
-  catch (e) { /* storage full or unavailable — export still succeeds, just isn't archived */ }
-}
-
 document.getElementById('exportDatalogBtn').addEventListener('click', () => {
-  const olderArchive = loadArchive(DATALOG_ARCHIVE_KEY); // oldest-first
-  const combined = [...olderArchive, ...allLogRows]; // oldest-first: archive, then this session
-  if (!combined.length) return;
-
-  const header = 'time,type,source,pm1_0,pm2_5,pm10,co2,sound_db,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note\n';
+  if (!allLogRows.length) return;
+  const header = 'time,type,source,pm1_0,pm2_5,pm10,co2,sound_db,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note\n';
   const csvField = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const toExport = INCLUDE_ARCHIVE_IN_DATALOG_EXPORT ? combined : allLogRows;
-  // toExport is oldest-first (push order); flip so the export reads
+  // allLogRows is oldest-first (push order); flip so the export reads
   // newest-first, matching how the on-screen Datalog table is shown.
-  const rows = [...toExport].reverse().map(r => [
+  const rows = [...allLogRows].reverse().map(r => [
     r.time, r.type || 'Reading', r.source,
     r.pm1, r.pm25, r.pm10, r.co2, r.db,
-    r.accelX, r.accelY, r.accelZ,
     r.magX, r.magY, r.magZ, r.pressure, r.humidity, r.gas,
     r.loc || ''
   ].map(csvField).join(',')).join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'datalog-archive.csv'; a.click();
+  a.href = url; a.download = 'datalog.csv'; a.click();
   URL.revokeObjectURL(url);
-
-  // Always save this session's rows onto the archive, whether or not
-  // this particular download included the older archive.
-  saveArchive(DATALOG_ARCHIVE_KEY, combined);
 });
 
 /* ================================================================
@@ -836,7 +777,7 @@ function addMeshRow(event, time, source, note) {
    ================================================================ */
 const canvas = document.getElementById('mainChart');
 const ctx = canvas.getContext('2d');
-const PALETTE = { ink: '#15140F', inkDim: '#75736A', line: '#DEDCD4', accent: '#FFED00', peer: '#A8A69C', error: '#B23A2A' };
+const PALETTE = { ink: '#15140F', inkDim: '#75736A', line: '#DEDCD4', accent: '#FFED00', peer: '#A8A69C' };
 
 function rollingAvg(arr, window) {
   return arr.map((_, i) => {
@@ -847,29 +788,18 @@ function rollingAvg(arr, window) {
 }
 
 function drawChart() {
-  // simData: the simulated "typical day" reference — drives the trend band
-  // and the x-axis timeline, and runs continuously regardless of connection
-  // state. liveData: real sensor readings only, from seriesData — plotted as
-  // points positioned at their own tick, and flagged as spikes wherever they
-  // diverge sharply from the simulated reference at that point in time.
-  const simData = simSeriesData[activeMetric];
-  const liveData = seriesData[activeMetric];
+  const data = seriesData[activeMetric];
   const w = canvas.width, h = canvas.height, padL = 36, padR = 12, padT = 18, padB = 32;
   ctx.clearRect(0, 0, w, h);
-  if (simData.length < 2) return; // still gathering the first simulated reference points
+  if (data.length < 2) return;
 
-  const simValues = simData.map(p => p.value);
-  const shortAvg = rollingAvg(simData, 5);
-  const longAvg = rollingAvg(simData, 25);
-  const liveValues = liveData.map(p => p.value);
-  const allValues = liveValues.length ? [...simValues, ...longAvg, ...liveValues] : [...simValues, ...longAvg];
-  const maxV = Math.max(...allValues) * 1.15;
-  const minV = Math.min(0, Math.min(...allValues) * 1.15);
+  const values = data.map(p => p.value);
+  const shortAvg = rollingAvg(data, 5);
+  const longAvg = rollingAvg(data, 25);
+  const maxV = Math.max(...values, ...longAvg) * 1.15;
+  const minV = Math.min(0, Math.min(...values) * 1.15);
 
-  const firstTick = simData[0].t, lastTick = simData[simData.length - 1].t;
-  const tickSpan = Math.max(1, lastTick - firstTick);
-  const xAt = t => padL + ((t - firstTick) / tickSpan) * (w - padL - padR);
-  const xAtIdx = i => xAt(simData[i].t);
+  const xAt = i => padL + (i / (data.length - 1)) * (w - padL - padR);
   const yAt = v => h - padB - ((v - minV) / (maxV - minV)) * (h - padT - padB);
 
   ctx.strokeStyle = PALETTE.line;
@@ -880,11 +810,11 @@ function drawChart() {
   }
 
   const showLabels = w >= 520;
-  const stationEvery = Math.max(1, Math.floor(simData.length / CHART_STATIONS.length));
+  const stationEvery = Math.max(1, Math.floor(data.length / CHART_STATIONS.length));
   ctx.font = '10px Arial, sans-serif';
   CHART_STATIONS.forEach((s, si) => {
-    const idx = Math.min(simData.length - 1, si * stationEvery);
-    const x = xAtIdx(idx);
+    const idx = Math.min(data.length - 1, si * stationEvery);
+    const x = xAt(idx);
     ctx.strokeStyle = PALETTE.line;
     ctx.setLineDash([2, 3]);
     ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
@@ -896,63 +826,40 @@ function drawChart() {
     }
   });
 
-  // Simulated trend band — the modelled reference for today, the one
-  // deliberate colour on the chart
+  // Trend band — the one deliberate colour on the chart
   ctx.beginPath();
-  ctx.moveTo(xAtIdx(0), yAt(longAvg[0]));
-  longAvg.forEach((v, i) => ctx.lineTo(xAtIdx(i), yAt(v)));
-  ctx.lineTo(xAtIdx(simData.length - 1), h - padB);
-  ctx.lineTo(xAtIdx(0), h - padB);
+  ctx.moveTo(xAt(0), yAt(longAvg[0]));
+  longAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+  ctx.lineTo(xAt(data.length - 1), h - padB);
+  ctx.lineTo(xAt(0), h - padB);
   ctx.closePath();
   ctx.fillStyle = 'rgba(255,237,0,0.20)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(210,220,0,0.95)';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(xAtIdx(0), yAt(longAvg[0]));
-  longAvg.forEach((v, i) => ctx.lineTo(xAtIdx(i), yAt(v)));
+  ctx.moveTo(xAt(0), yAt(longAvg[0]));
+  longAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
   ctx.stroke();
 
-  // Simulated rolling average — dashed grey, same reference series
+  // Rolling average — dashed grey
   ctx.strokeStyle = PALETTE.inkDim;
   ctx.setLineDash([5, 4]);
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(xAtIdx(0), yAt(shortAvg[0]));
-  shortAvg.forEach((v, i) => ctx.lineTo(xAtIdx(i), yAt(v)));
+  ctx.moveTo(xAt(0), yAt(shortAvg[0]));
+  shortAvg.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
   ctx.stroke();
   ctx.setLineDash([]);
 
-  if (liveData.length) {
-    // Live readings — colour follows which node the sample came from
-    for (let i = 1; i < liveData.length; i++) {
-      ctx.strokeStyle = colorForSource(liveData[i].source);
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(xAt(liveData[i - 1].t), yAt(liveData[i - 1].value));
-      ctx.lineTo(xAt(liveData[i].t), yAt(liveData[i].value));
-      ctx.stroke();
-    }
-    // Spike flag — compare each live reading against the simulated
-    // long-average at the nearest point in time; large deviations get a
-    // bigger red dot instead of the usual source colour.
-    liveData.forEach(p => {
-      let nearestIdx = 0, bestDiff = Infinity;
-      simData.forEach((sp, i) => {
-        const diff = Math.abs(sp.t - p.t);
-        if (diff < bestDiff) { bestDiff = diff; nearestIdx = i; }
-      });
-      const ref = longAvg[nearestIdx];
-      const isSpike = Math.abs(p.value - ref) > Math.max(Math.abs(ref) * 0.35, 0.001);
-      ctx.beginPath();
-      ctx.arc(xAt(p.t), yAt(p.value), isSpike ? 3.5 : 2, 0, Math.PI * 2);
-      ctx.fillStyle = isSpike ? PALETTE.error : colorForSource(p.source);
-      ctx.fill();
-    });
-  } else {
-    ctx.fillStyle = PALETTE.inkDim;
-    ctx.font = '11px Arial, sans-serif';
-    ctx.fillText('Awaiting live sensor data — showing simulated trend for today', padL, padT + 12);
+  // Live readings — colour follows which node the sample came from
+  for (let i = 1; i < data.length; i++) {
+    ctx.strokeStyle = colorForSource(data[i].source);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xAt(i - 1), yAt(data[i - 1].value));
+    ctx.lineTo(xAt(i), yAt(data[i].value));
+    ctx.stroke();
   }
 }
 
@@ -1147,7 +1054,6 @@ function addFieldEntry(type) {
   addLogRow({
     time: entry.time, type: entry.type, source: 'field',
     pm1: '—', pm25: '—', pm10: '—', co2: '—', db: '—',
-    accelX: '—', accelY: '—', accelZ: '—',
     magX: '—', magY: '—', magZ: '—', pressure: '—', humidity: '—', gas: '—',
     loc: station ? (station.name + (entry.note ? ' · ' + entry.note : '')) : (entry.note || '—')
   });
@@ -1177,29 +1083,15 @@ function renderFieldLog() {
 document.getElementById('checkInBtn').addEventListener('click', () => addFieldEntry('Check-in'));
 document.getElementById('tagStopBtn').addEventListener('click', () => addFieldEntry('Tag'));
 
-const FIELDLOG_ARCHIVE_KEY = 'undersensed_fieldlog_archive_v1';
-const INCLUDE_ARCHIVE_IN_FIELDLOG_EXPORT = false; // same switch as the Datalog archive, kept off for now
-
 document.getElementById('exportBtn').addEventListener('click', () => {
-  const olderArchive = loadArchive(FIELDLOG_ARCHIVE_KEY); // oldest-first
-  const thisSession = [...fieldLog].reverse(); // fieldLog is newest-first (unshift) — flip to oldest-first
-  const combined = [...olderArchive, ...thisSession];
-  if (!combined.length) return;
-
+  if (!fieldLog.length) return;
   const header = 'type,time,lat,lon,station,source,note\n';
-  const csvField = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const toExport = INCLUDE_ARCHIVE_IN_FIELDLOG_EXPORT ? combined : thisSession;
-  // Flip back to newest-first for the download, matching the on-screen list.
-  const rows = [...toExport].reverse().map(e =>
-    [e.type, e.time, e.lat, e.lon, e.station, e.source || '', e.note].map(csvField).join(',')
-  ).join('\n');
+  const rows = fieldLog.map(e => [e.type, e.time, e.lat, e.lon, e.station, e.source || '', '"' + e.note.replace(/"/g, '""') + '"'].join(',')).join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'field-log-archive.csv'; a.click();
+  a.href = url; a.download = 'field-log.csv'; a.click();
   URL.revokeObjectURL(url);
-
-  saveArchive(FIELDLOG_ARCHIVE_KEY, combined);
 });
 
 /* ================================================================
@@ -1215,22 +1107,33 @@ document.querySelectorAll('.viewTab').forEach(tab => {
 });
 
 /* ================================================================
-   Simulated comparison heartbeat — models a typical day's trend and
-   spike pattern per metric, purely so live readings have something to
-   be judged against once a node is connected. This is the ONLY thing
-   that still uses generateSample(): it writes exclusively into
-   simSeriesData, and never calls addLogRow or addMeshRow, so nothing
-   simulated ever reaches the Datalog, the Mesh table, or the CSV
-   exports — those stay real-data-only.
+   Simulation loop — stands in for real BLE notifications. Runs
+   every 3s for easy viewing; drop to the real cadence once wired
+   to hardware.
    ================================================================ */
+let simulating = true;
 setInterval(() => {
+  if (!simulating) return;
   tick++;
-  METRICS.forEach(m => {
-    const arr = simSeriesData[m.id];
-    arr.push(generateSample(m.id, 'sim'));
-    if (arr.length > SIM_WINDOW) arr.shift();
-  });
+  const source = Math.random() < 0.7 ? 'self' : 'peer';
+  METRICS.forEach(m => pushMetricSample(m.id, generateSample(m.id, source)));
   drawChart();
+
+  const latest = id => seriesData[id][seriesData[id].length - 1];
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  addLogRow({
+    time: timeStr, source,
+    pm1: latest('pm1').value.toFixed(1), pm25: latest('pm25').value.toFixed(1), pm10: latest('pm10').value.toFixed(1),
+    co2: latest('co2').value.toFixed(0), db: latest('sound').value.toFixed(1),
+    magX: latest('magX').value.toFixed(2), magY: latest('magY').value.toFixed(2), magZ: latest('magZ').value.toFixed(2),
+    pressure: latest('pressure').value.toFixed(1), humidity: latest('humidity').value.toFixed(1), gas: latest('gas').value.toFixed(0)
+  });
+
+  if (Math.random() < 0.3) {
+    const eventType = Math.random() < 0.5 ? 'Sent' : 'Received';
+    const note = STATIONS[Math.floor(Math.random() * (STATIONS.length - 1))].name + ' → ' + STATIONS[Math.floor(Math.random() * (STATIONS.length - 1)) + 1].name;
+    addMeshRow(eventType, timeStr, source, note);
+  }
 }, 3000);
 
 renderFieldLog();
