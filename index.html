@@ -309,7 +309,7 @@
         <span><span class="swatch" style="background:var(--error)"></span>spike vs sim</span>
       </div>
       <canvas id="mainChart" width="900" height="300"></canvas>
-      <div class="note">Yellow band = a simulated trend/spike model for today, shown only as a comparison reference. Black/grey points are live sensor readings; red points flag spikes against that reference. Station markers are illustrative until real dwell-detection events feed this chart.</div>
+      <div class="note">Yellow band = a simulated trend/spike model for today, shown only as a comparison reference. Black/grey points are live sensor readings; red points flag spikes against that reference. Station markers show your real Check-in/Tag stops once logged in Field (yellow dot = Tag, black = Check-in), placed exactly where they happened on the timeline — evenly-spaced placeholder dots show only until your first real check-in.</div>
     </div>
 
     <div class="panel">
@@ -319,7 +319,7 @@
           <thead>
             <tr>
               <th>Time</th><th>Type</th><th>Src</th>
-              <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
+              <th>PM2.5</th><th>PM5</th><th>PM10</th>
               <th>CO2</th><th>dB</th>
               <th>AccelX</th><th>AccelY</th><th>AccelZ</th>
               <th>MagX</th><th>MagY</th><th>MagZ</th>
@@ -338,7 +338,7 @@
             <thead>
               <tr>
                 <th>Time</th><th>Type</th><th>Src</th>
-                <th>PM1.0</th><th>PM2.5</th><th>PM10</th>
+                <th>PM2.5</th><th>PM5</th><th>PM10</th>
                 <th>CO2</th><th>dB</th>
                 <th>AccelX</th><th>AccelY</th><th>AccelZ</th>
                 <th>MagX</th><th>MagY</th><th>MagZ</th>
@@ -456,7 +456,10 @@ function updateBtStatus() {
   } else {
     btStatus.innerHTML = list.map(c => {
       const dotStyle = c.connected ? ('background:' + colorForSource(c.label)) : 'background:var(--error)';
-      return '<span class="dot" style="' + dotStyle + '"></span>' + c.label + (c.connected ? '' : ' (disconnected)');
+      const flag = (c.connected && needsAttention[c.label])
+        ? ' <span style="color:var(--error);cursor:default;" title="Repeated read errors from this node — try wiggling the wiring, or pull this up on a laptop for more detail">!</span>'
+        : '';
+      return '<span class="dot" style="' + dotStyle + '"></span>' + c.label + (c.connected ? '' : ' (disconnected)') + flag;
     }).join(' &nbsp; ');
   }
   renderLegend();
@@ -496,6 +499,11 @@ async function connectBluetooth() {
     const label = device.name || ('Node ' + (connections.size + 1));
     const conn = { device, label, connected: false };
     connections.set(device.id, conn);
+    // Fresh node (or a reconnect under the same name) starts clean —
+    // no repeated-value history or attention flag carried over.
+    lastGoodValue[label] = {};
+    errorStreak[label] = {};
+    needsAttention[label] = false;
     updateBtStatus();
 
     const server = await device.gatt.connect();
@@ -527,6 +535,21 @@ async function connectBluetooth() {
   }
 }
 
+// Per-node last-known-good value per metric — when a reading errors out
+// (ERROR_VALUE from the sensor), we quietly repeat this instead, so a
+// wiring flake doesn't show up as a gap or an "error" cell in the
+// Datalog mid-session. Per-node so two connected nodes don't bleed into
+// each other's repeats.
+const lastGoodValue = {}; // source -> { metricId -> value }
+// Consecutive-error streak per node+metric — used only to decide when to
+// raise the quiet "!" next to a node's name in the header. The Datalog
+// and chart never show this; it's purely so you know when it's worth
+// wiggling a wire or pulling out the laptop, without anything changing
+// in the dataset itself.
+const errorStreak = {};    // source -> { metricId -> streak count }
+const needsAttention = {}; // source -> boolean
+const ATTENTION_STREAK_THRESHOLD = 3; // consecutive missed readings on one metric before flagging
+
 function handleSensorNotification(event, conn) {
   const v = event.target.value;
   const ERROR_VALUE = -9999;
@@ -534,33 +557,70 @@ function handleSensorNotification(event, conn) {
   const accelX = readOrNull(8), accelY = readOrNull(12), accelZ = readOrNull(16);
   const magX = readOrNull(20), magY = readOrNull(24), magZ = readOrNull(28);
   const pressure = readOrNull(32), co2 = readOrNull(36), soundDb = readOrNull(40);
-  const pm1 = readOrNull(44), pm25 = readOrNull(48), pm10 = readOrNull(52);
+  const pm5 = readOrNull(44), pm25 = readOrNull(48), pm10 = readOrNull(52);
   const humidity = readOrNull(56), gasResistance = readOrNull(60);
   // Source is now which physical BLE node this notification arrived
   // from (conn.label), not the old single-connection self/peer byte —
   // with two independent connections open at once, the connection
   // itself already tells us which node the reading is from.
   const source = conn.label;
+  if (!lastGoodValue[source]) lastGoodValue[source] = {};
+  if (!errorStreak[source]) errorStreak[source] = {};
 
   tick++;
-  [['sound', soundDb], ['pm1', pm1], ['pm25', pm25], ['pm10', pm10], ['co2', co2],
+  const readings = [['sound', soundDb], ['pm25', pm25], ['pm5', pm5], ['pm10', pm10], ['co2', co2],
    ['accelX', accelX], ['accelY', accelY], ['accelZ', accelZ],
    ['magX', magX], ['magY', magY], ['magZ', magZ], ['pressure', pressure],
-   ['humidity', humidity], ['gas', gasResistance]].forEach(([id, val]) => {
-    if (val !== null) pushMetricSample(id, { t: tick, value: val, source });
+   ['humidity', humidity], ['gas', gasResistance]];
+
+  let flagged = false;
+  const heldIds = []; // metric ids repeated this tick, for the CSV-only provenance column below
+  const resolved = {}; // the value actually logged to the Datalog/CSV this tick — real, or a quietly repeated last-good value
+  readings.forEach(([id, val]) => {
+    if (val !== null) {
+      lastGoodValue[source][id] = val;
+      errorStreak[source][id] = 0;
+      resolved[id] = val;
+      // Only a genuinely fresh reading feeds the Trends and Spikes chart —
+      // a repeated value is not a new observation, so it must never get
+      // plotted or compared against the sim trend: a stuck flat value
+      // could otherwise light up as a false spike, or quietly flatten the
+      // trend line, neither of which reflects anything real. During a
+      // hold, that metric's line on the chart simply pauses (no new
+      // point) rather than drawing anything from a repeat.
+      pushMetricSample(id, { t: tick, value: val, source });
+    } else {
+      errorStreak[source][id] = (errorStreak[source][id] || 0) + 1;
+      resolved[id] = (id in lastGoodValue[source]) ? lastGoodValue[source][id] : null; // nothing to repeat yet on a first-ever error
+      if (resolved[id] !== null) heldIds.push(id);
+      if (errorStreak[source][id] >= ATTENTION_STREAK_THRESHOLD) flagged = true;
+    }
   });
+
+  if (needsAttention[source] !== flagged) {
+    needsAttention[source] = flagged;
+    updateBtStatus(); // only place this surfaces — a quiet "!" next to the node's name
+  }
+
   drawChart();
 
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   addLogRow({
-    time: timeStr, source, pm1: fmt(pm1, 1), pm25: fmt(pm25, 1), pm10: fmt(pm10, 1),
-    co2: fmt(co2, 0), db: fmt(soundDb, 1),
-    accelX: fmt(accelX, 2), accelY: fmt(accelY, 2), accelZ: fmt(accelZ, 2),
-    magX: fmt(magX, 2), magY: fmt(magY, 2), magZ: fmt(magZ, 2),
-    pressure: fmt(pressure, 1), humidity: fmt(humidity, 1), gas: fmt(gasResistance, 0)
+    time: timeStr, source, pm25: fmt(resolved.pm25, 1), pm5: fmt(resolved.pm5, 1), pm10: fmt(resolved.pm10, 1),
+    co2: fmt(resolved.co2, 0), db: fmt(resolved.sound, 1),
+    accelX: fmt(resolved.accelX, 2), accelY: fmt(resolved.accelY, 2), accelZ: fmt(resolved.accelZ, 2),
+    magX: fmt(resolved.magX, 2), magY: fmt(resolved.magY, 2), magZ: fmt(resolved.magZ, 2),
+    pressure: fmt(resolved.pressure, 1), humidity: fmt(resolved.humidity, 1), gas: fmt(resolved.gas, 0),
+    // Not rendered anywhere in the live UI (rowHTML below never reads
+    // this field) — it only rides along into the CSV export, as a
+    // quiet paper trail of which cells in this row were a repeated
+    // value rather than a fresh reading, in case a sensor stays down
+    // for good and this needs to be cleaned up in post-processing.
+    held: heldIds.join(' ')
   });
 }
 function fmt(val, decimals) { return val !== null && val !== undefined ? val.toFixed(decimals) : 'error'; }
+
 
 function handleMeshNotification(event, conn) {
   const text = new TextDecoder().decode(event.target.value);
@@ -573,7 +633,7 @@ function handleMeshNotification(event, conn) {
    Metrics + simulated data (stands in until real hardware notifies)
    ================================================================ */
 const METRICS = [
-  { id: 'sound', label: 'Sound' }, { id: 'pm1', label: 'PM1.0' }, { id: 'pm25', label: 'PM2.5' },
+  { id: 'sound', label: 'Sound' }, { id: 'pm25', label: 'PM2.5' }, { id: 'pm5', label: 'PM5' },
   { id: 'pm10', label: 'PM10' }, { id: 'co2', label: 'CO2' },
   { id: 'accelX', label: 'Accel X' }, { id: 'accelY', label: 'Accel Y' }, { id: 'accelZ', label: 'Accel Z' },
   { id: 'magX', label: 'Mag X' }, { id: 'magY', label: 'Mag Y' }, { id: 'magZ', label: 'Mag Z' },
@@ -686,8 +746,10 @@ CHART_METRICS.forEach(m => {
 });
 
 // Accel baseline is in g: X/Y sit near 0 at rest, Z carries gravity (~1g).
-function baselineFor(id) { return { sound:55, pm1:3, pm25:12, pm10:18, co2:550, accelX:0, accelY:0, accelZ:1, magX:20, magY:-20, magZ:55, pressure:1010, humidity:55, gas:13000 }[id]; }
-function spikeChanceFor(id) { return { sound:0.12, pm1:0.06, pm25:0.08, pm10:0.08, co2:0.06, accelX:0.08, accelY:0.08, accelZ:0.06, magX:0.04, magY:0.04, magZ:0.04, pressure:0.02, humidity:0.03, gas:0.05 }[id]; }
+// PM readings are cumulative by particle size (PM2.5 ⊆ PM5 ⊆ PM10), so the
+// PM5 baseline sits between the PM2.5 and PM10 ones, not below them.
+function baselineFor(id) { return { sound:55, pm25:12, pm5:14, pm10:18, co2:550, accelX:0, accelY:0, accelZ:1, magX:20, magY:-20, magZ:55, pressure:1010, humidity:55, gas:13000 }[id]; }
+function spikeChanceFor(id) { return { sound:0.12, pm25:0.08, pm5:0.06, pm10:0.08, co2:0.06, accelX:0.08, accelY:0.08, accelZ:0.06, magX:0.04, magY:0.04, magZ:0.04, pressure:0.02, humidity:0.03, gas:0.05 }[id]; }
 
 let tick = 0;
 function generateSample(id, source) {
@@ -749,7 +811,7 @@ function isFieldRow(row) { return row.type && row.type !== 'Reading'; }
 function rowHTML(row) {
   const srcStyle = row.source === 'field' ? '' : ('color:' + colorForSource(row.source) + ';font-weight:600;');
   return `<td>${row.time}</td><td>${row.type || 'Reading'}</td><td style="${srcStyle}">${row.source}</td>` +
-         `<td>${row.pm1}</td><td>${row.pm25}</td><td>${row.pm10}</td>` +
+         `<td>${row.pm25}</td><td>${row.pm5}</td><td>${row.pm10}</td>` +
          `<td>${row.co2}</td><td>${row.db}</td>` +
          `<td>${row.accelX}</td><td>${row.accelY}</td><td>${row.accelZ}</td>` +
          `<td>${row.magX}</td><td>${row.magY}</td><td>${row.magZ}</td>` +
@@ -790,28 +852,56 @@ function saveArchive(key, rows) {
   catch (e) { /* storage full or unavailable — export still succeeds, just isn't archived */ }
 }
 
+// Shared CSV "download" used by every Export CSV button. Plain
+// blob-URL + <a download> works on desktop, but on phones — iOS Safari
+// especially — it's unreliable: an anchor that's never attached to the
+// document is silently ignored by some mobile browsers, and even when
+// it isn't, Mobile Safari frequently just opens the CSV as text in a
+// new tab instead of saving a file, with no way to get it into Files.
+// The native share sheet (navigator.share with a File) is the
+// reliable path on a phone — it lets you save to Files, AirDrop it,
+// or send it straight to another app. We try that first and only
+// fall back to the anchor-click method where share isn't available
+// (most desktop browsers), fixing it there too so it can't regress.
+async function downloadCSV(filename, csvText) {
+  const blob = new Blob([csvText], { type: 'text/csv' });
+  const file = (typeof File !== 'undefined') ? new File([blob], filename, { type: 'text/csv' }) : null;
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user cancelled the share sheet — not a failure
+      // any other share failure (e.g. no share target) — fall through to the anchor download below
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); // must be in the DOM for some mobile browsers to fire the click
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 document.getElementById('exportDatalogBtn').addEventListener('click', () => {
   const olderArchive = loadArchive(DATALOG_ARCHIVE_KEY); // oldest-first
   const combined = [...olderArchive, ...allLogRows]; // oldest-first: archive, then this session
   if (!combined.length) return;
 
-  const header = 'time,type,source,pm1_0,pm2_5,pm10,co2,sound_db,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note\n';
+  const header = 'time,type,source,pm2_5,pm5,pm10,co2,sound_db,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,pressure,humidity,gas_resistance,location_note,held_fields\n';
   const csvField = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   const toExport = INCLUDE_ARCHIVE_IN_DATALOG_EXPORT ? combined : allLogRows;
   // toExport is oldest-first (push order); flip so the export reads
   // newest-first, matching how the on-screen Datalog table is shown.
   const rows = [...toExport].reverse().map(r => [
     r.time, r.type || 'Reading', r.source,
-    r.pm1, r.pm25, r.pm10, r.co2, r.db,
+    r.pm25, r.pm5, r.pm10, r.co2, r.db,
     r.accelX, r.accelY, r.accelZ,
     r.magX, r.magY, r.magZ, r.pressure, r.humidity, r.gas,
-    r.loc || ''
+    r.loc || '', r.held || ''
   ].map(csvField).join(',')).join('\n');
-  const blob = new Blob([header + rows], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'datalog-archive.csv'; a.click();
-  URL.revokeObjectURL(url);
+  downloadCSV('datalog-archive.csv', header + rows);
 
   // Always save this session's rows onto the archive, whether or not
   // this particular download included the older archive.
@@ -880,16 +970,37 @@ function drawChart() {
   }
 
   const showLabels = w >= 520;
-  const stationEvery = Math.max(1, Math.floor(simData.length / CHART_STATIONS.length));
   ctx.font = '10px Arial, sans-serif';
-  CHART_STATIONS.forEach((s, si) => {
-    const idx = Math.min(simData.length - 1, si * stationEvery);
-    const x = xAtIdx(idx);
+
+  // Station markers: once you've actually checked in / tagged stops in
+  // the Field view, those real (tick, station) pairs drive the markers
+  // below — so a marker's x-position is exactly where that check-in
+  // landed on the live/sim timeline, not a guess. Each field-log entry
+  // records the shared `tick` counter at the moment it was logged (see
+  // addFieldEntry), which is the same counter live sensor readings and
+  // the sim reference both plot against, so all three line up correctly.
+  // Falls back to the old evenly-spaced illustrative dots only until
+  // your first real check-in exists.
+  const loggedStops = fieldLog.filter(e =>
+    e.station && e.station !== '—' && typeof e.tick === 'number' && e.tick >= firstTick && e.tick <= lastTick
+  );
+  const usingRealStops = loggedStops.length > 0;
+  const stationMarks = usingRealStops
+    ? loggedStops.map(e => ({ name: e.station, x: xAt(e.tick), tagged: e.type === 'Tag' }))
+    : (() => {
+        const stationEvery = Math.max(1, Math.floor(simData.length / CHART_STATIONS.length));
+        return CHART_STATIONS.map((s, si) => ({ name: s.name, x: xAtIdx(Math.min(simData.length - 1, si * stationEvery)), tagged: false }));
+      })();
+
+  stationMarks.forEach(s => {
+    const x = s.x;
     ctx.strokeStyle = PALETTE.line;
     ctx.setLineDash([2, 3]);
     ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(x, padT, 2.5, 0, Math.PI * 2); ctx.fillStyle = PALETTE.ink; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, padT, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = usingRealStops ? (s.tagged ? PALETTE.accent : PALETTE.ink) : PALETTE.ink;
+    ctx.fill();
     if (showLabels) {
       ctx.fillStyle = PALETTE.inkDim;
       ctx.fillText(s.name, x + 4, padT + 10);
@@ -1126,6 +1237,7 @@ function addFieldEntry(type) {
   const entry = {
     id: Date.now(),
     type,
+    tick, // shared counter also used by live/sim chart data — lets the Trends and Spikes chart place this check-in exactly on the timeline
     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     lat: selected ? selected.lat.toFixed(5) : (currentPos ? currentPos.lat.toFixed(5) : '—'),
     lon: selected ? selected.lon.toFixed(5) : (currentPos ? currentPos.lon.toFixed(5) : '—'),
@@ -1146,7 +1258,7 @@ function addFieldEntry(type) {
   // dashed out; the station + note ride in the Location/Note column instead.
   addLogRow({
     time: entry.time, type: entry.type, source: 'field',
-    pm1: '—', pm25: '—', pm10: '—', co2: '—', db: '—',
+    pm25: '—', pm5: '—', pm10: '—', co2: '—', db: '—',
     accelX: '—', accelY: '—', accelZ: '—',
     magX: '—', magY: '—', magZ: '—', pressure: '—', humidity: '—', gas: '—',
     loc: station ? (station.name + (entry.note ? ' · ' + entry.note : '')) : (entry.note || '—')
@@ -1193,11 +1305,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   const rows = [...toExport].reverse().map(e =>
     [e.type, e.time, e.lat, e.lon, e.station, e.source || '', e.note].map(csvField).join(',')
   ).join('\n');
-  const blob = new Blob([header + rows], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'field-log-archive.csv'; a.click();
-  URL.revokeObjectURL(url);
+  downloadCSV('field-log-archive.csv', header + rows);
 
   saveArchive(FIELDLOG_ARCHIVE_KEY, combined);
 });
