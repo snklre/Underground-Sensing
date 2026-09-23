@@ -157,7 +157,7 @@
   td.field { color: var(--ink); font-weight: 600; }
   .data-table tr.field-row td { background: var(--accent-dim); }
   .data-table tr.field-row td:first-child { background: var(--accent-dim); }
-  .archived-cell { color: var(--peer); font-style: italic; border-bottom: 1px dashed var(--peer); cursor: help; }
+  .archived-cell { color: var(--peer); cursor: help; }
   .data-table td.log-note { white-space: normal; min-width: 140px; }
   .table-scroll { max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: 2px; }
 
@@ -294,6 +294,12 @@
 
   <div id="monitorView" class="view active">
     <div class="panel">
+      <h2>Device Status<span class="hint">read once at connect · bus/address + init state</span></h2>
+      <div id="statusEmpty" class="empty-state">No status yet — connect a node.</div>
+      <div id="statusList"></div>
+    </div>
+
+    <div class="panel">
       <h2>Signal Field<span class="hint">particulate density · sound flicker</span></h2>
       <canvas id="pixelViz" width="480" height="480"></canvas>
       <div class="pixel-readout mono" id="pixelReadout">PM2.5 — µg/m³ · — dB</div>
@@ -419,6 +425,7 @@ const UNDERSENSED_SERVICE_UUID = 'b3c9a000-1d2e-4f3a-8b6c-9e0f1a2b3c4d';
 const SENSOR_DATA_CHAR_UUID    = 'b3c9a001-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // notify: latest reading
 const MESH_EVENT_CHAR_UUID     = 'b3c9a002-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // notify: latest mesh event
 const TIME_SYNC_CHAR_UUID      = 'b3c9a003-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // write: phone epoch time
+const STATUS_CHAR_UUID         = 'b3c9a004-1d2e-4f3a-8b6c-9e0f1a2b3c4d'; // read once: boot-time sensor/bus status
 
 const btStatus = document.getElementById('btStatus');
 document.getElementById('connectBtn').addEventListener('click', connectBluetooth);
@@ -449,6 +456,39 @@ function colorForSource(source) {
     nodeColorAssignment[source] = NODE_COLOR_PALETTE[n % NODE_COLOR_PALETTE.length];
   }
   return nodeColorAssignment[source];
+}
+
+// Renders the once-per-connection boot status (bus/address + init state)
+// read from STATUS_CHAR_UUID. Shown per connected node, since each
+// physical XIAO reports its own sensors independently.
+function renderStatusPanel() {
+  const list = [...connections.values()].filter(c => c.connected);
+  const empty = document.getElementById('statusEmpty');
+  const container = document.getElementById('statusList');
+  if (!list.length) {
+    empty.style.display = 'block';
+    container.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+  container.innerHTML = list.map(c => {
+    if (!c.status) {
+      return '<div style="margin-bottom:10px;"><div style="font-weight:600;margin-bottom:2px;">' + c.label + '</div>' +
+        '<div class="mono" style="font-size:11px;color:var(--ink-dim);">Boot status not available — reflash this node with the latest firmware.</div></div>';
+    }
+    const s = c.status;
+    const micName = s.micType === 1 ? 'INMP441' : (s.micType === 2 ? 'SPH0645' : 'mic');
+    const bmeName = s.isBME680 ? 'BME680' : 'BME280';
+    const lines = [
+      s.bmeOK ? bmeName + ' — found on 0x' + s.bmeAddr.toString(16) : 'Env sensor (BME280/680) — not found',
+      s.micOK ? micName + ' — init OK' : micName + ' — init FAILED',
+      s.mpuOK ? 'MPU6050 — found' : 'MPU6050 — not present',
+      s.mmcOK ? 'MMC5603 — found' : 'MMC5603 — not found',
+      s.scd40OK ? 'SCD4x — found' : 'SCD4x — not present'
+    ];
+    return '<div style="margin-bottom:10px;"><div style="font-weight:600;margin-bottom:2px;">' + c.label + '</div>' +
+      '<div class="mono" style="font-size:11px;color:var(--ink-dim);line-height:1.7;">' + lines.join('<br>') + '</div></div>';
+  }).join('');
 }
 
 function updateBtStatus() {
@@ -525,12 +565,38 @@ async function connectBluetooth() {
     new DataView(epochBuf).setUint32(0, Math.floor(Date.now() / 1000), true);
     await timeSyncChar.writeValue(epochBuf);
 
+    // Boot-time diagnostic status: which bus address the env sensor was
+    // found on, whether the mic channel initialized, etc. This is a plain
+    // READ (not a subscription) since the firmware only sets it once at
+    // boot and never updates it again mid-session. Older firmware won't
+    // have this characteristic at all, so a missing/failed read is treated
+    // as "not available" rather than a connection error.
+    try {
+      const statusChar = await service.getCharacteristic(STATUS_CHAR_UUID);
+      const v = await statusChar.readValue();
+      conn.status = {
+        deviceId: v.getUint8(0),
+        mpuOK: !!v.getUint8(1),
+        mmcOK: !!v.getUint8(2),
+        scd40OK: !!v.getUint8(3),
+        bmeOK: !!v.getUint8(4),
+        isBME680: !!v.getUint8(5),
+        bmeAddr: v.getUint8(6),
+        micOK: !!v.getUint8(7),
+        micType: v.getUint8(8)
+      };
+    } catch (e) {
+      conn.status = null;
+    }
+    renderStatusPanel();
+
     conn.connected = true;
     updateBtStatus();
 
     device.addEventListener('gattserverdisconnected', () => {
       conn.connected = false;
       updateBtStatus();
+      renderStatusPanel();
     });
   } catch (err) {
     btStatus.innerHTML = '<span class="dot" style="background:var(--error)"></span>Connection failed: ' + err.message;
@@ -1420,6 +1486,7 @@ setInterval(() => {
 
 renderFieldLog();
 renderLegend();
+renderStatusPanel();
 drawChart();
 window.addEventListener('resize', drawChart);
 </script>
