@@ -294,7 +294,7 @@
 
   <div id="monitorView" class="view active">
     <div class="panel">
-      <h2>Device Status<span class="hint">read once at connect · bus/address + init state</span></h2>
+      <h2>Device Status<span class="hint">field connect · bus/address + init state</span></h2>
       <div id="statusEmpty" class="empty-state">No status yet — connect a node.</div>
       <div id="statusList"></div>
     </div>
@@ -317,7 +317,7 @@
         <span><span class="swatch" style="background:var(--peer)"></span>archived avg fallback</span>
       </div>
       <canvas id="mainChart" width="900" height="300"></canvas>
-      <div class="note">Yellow band = a simulated trend/spike model for today, shown only as a comparison reference. Black/grey points are live sensor readings; red points flag spikes against that reference. Dashed grey stretches/hollow dots are the archived-average fallback, filled in once a node is flagged (see "!" next to its name) and its last good value stops being repeated. Station markers show your real Check-in/Tag stops once logged in Field (yellow dot = Tag, black = Check-in), placed exactly where they happened on the timeline — evenly-spaced placeholder dots show only until your first real check-in.</div>
+      <div class="note">Yellow band = a simulated trend/spike model for today, shown only as a comparison reference. Black/grey points are live sensor readings; red points flag spikes against that reference. Dashed grey stretches/hollow dots are the archived-average fallback, filled in once a node is flagged.</div>
     </div>
 
     <div class="panel">
@@ -338,7 +338,7 @@
           <tbody id="logBody"></tbody>
         </table>
       </div>
-      <div class="note">Live readings from a connected node, your own field check-ins/tags, and — once a node is flagged (dashed, dimmed cells) — an archived-average fallback for whichever metrics are failing to read, are logged here.</div>
+      <div class="note">Live readings from a connected node.</div>
       <button id="archiveToggle" style="display:none;">Show archive</button>
       <div id="archivePane" style="display:none !important;">
         <div class="table-scroll">
